@@ -1,7 +1,7 @@
 # pb-CpG-tools
 A collection of tools for the analysis of CpG/5mC data from PacBio HiFi reads.
 
-Currently available tools:
+## Available Tools
 - `aligned_bam_to_cpg_scores.py`: Obtain a list of CpG/5mC sites and modification probabilities from a BAM file of HiFi reads aligned to a reference genome.
 
 
