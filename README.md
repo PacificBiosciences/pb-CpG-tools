@@ -68,17 +68,25 @@ Optional arguments:
 
 #### Details
 
-The `-p, --pileup_mode` selects the method used to calculate modification probabilities. The `model` approach is preferred. It uses distributions of modification scores and a machine-learning model to calculate the modification probabilities across CG sites. Using this option `-p model` requires providing the path to the directory containing the model files with the `-d, --model_dir` flag. The required model is available here in the `pileup_calling_model/` directory. The `count` method is simplistic: for a given site, the number of reads with a modification score of >0.5 and <0.5 are counted and the modification probability is given as a percentage.
+The `-p, --pileup_mode` selects the method used to calculate modification probabilities.
+- `model`: This approach is preferred. It uses distributions of modification scores and a machine-learning model to calculate the modification probabilities across CG sites. Using this option requires providing the path to the directory containing the model files with the `-d, --model_dir` flag. The required model is available in the `pileup_calling_model/` directory. 
+- `count`: This method is simplistic. For a given site, the number of reads with a modification score of >0.5 and <0.5 are counted and the modification probability is given as a percentage.
 
-The `-m, --modsites` flag determines which sites will be reported. The `denovo` option will only output a CG site if at least one read has a modification score > 0. Because of this, CG sites in the alignments with zero modification probability will not be reported. The `reference` option will identify all CG sites in the reference and output all sites, regardless of modification scores. This mode does not ensure the aligned reads display a CG site (e.g., there may be sequence mismatches between reads and reference). 
+The `-m, --modsites` flag determines which sites will be reported. 
+- `denovo`: This option will only output a CG site if at least one read has a modification score > 0. Because of this, CG sites in the alignments with zero modification probability will not be reported. 
+- `reference`: This option will identify all CG sites in the reference and output all sites, regardless of modification scores. This mode does not ensure the aligned reads display a CG site (e.g., there may be sequence mismatches between reads and reference). 
 
-Using the `-a, --hap_tag` flag allows an arbitrary SAM tag to be used to identify haplotypes. The haplotype values must be `0`, `1`, and `2`, where `0` is not assigned/ambiguous.
+Using the `-a, --hap_tag` flag allows an arbitrary SAM tag to be used to identify haplotypes, rather than the default `HP` tag. The haplotype values must be `0`, `1`, and `2`, where `0` is not assigned/ambiguous.
 
 ## Outputs
 
-There are bed format (`.bed`) and bigwig format (`.bw`) files generated for the complete read set and each separate haplotype (when available). In addition, there are coverage filtered version of these files produced that are based on the minimum coverage value set for ` -c, --min_coverage`. A log file is also produced (`[label]-aligned_bam_to_cpg_scores.log`).
+There are bed format (`.bed`) and bigwig format (`.bw`) files generated for the complete read set and each separate haplotype (when available). 
 
-If haplotype information is absent, the following files are expected:
+In addition, there are coverage filtered version of these files produced that are based on the minimum coverage value set for `-c, --min_coverage`. 
+
+A log file is also produced (`[label]-aligned_bam_to_cpg_scores.log`).
+
+If haplotype information is absent, the following 4 files are expected:
 
 ```
 [label].total.[pileup_mode].bed
@@ -87,7 +95,7 @@ If haplotype information is absent, the following files are expected:
 [label].total.[pileup_mode].mincov[X].bw
 ```
 
-If haplotype information is present, the following files will be produced:
+If haplotype information is present, the following 12 files are expected:
 
 ```
 [label].total.[pileup_mode].bed
@@ -105,6 +113,7 @@ If haplotype information is present, the following files will be produced:
 ```
 
 The bed file columns will differ between the `-p model` and `-p count` methods, but both share the first 6 columns:
+
 1. reference name
 2. start coordinate
 3. end coordinate
@@ -113,6 +122,7 @@ The bed file columns will differ between the `-p model` and `-p count` methods, 
 6. coverage
 
 For `-p count`, four additional columns are present:
+
 7. modified site count
 8. unmodified site count
 9. avg mod score
@@ -122,7 +132,7 @@ The bigwig files are in an indexed binary format and contain columns 1-4 listed 
 
 ## Performance
 
-The current `-s, --chunksize` default of 500,000 requires 1-3 Gb memory per thread. A 30X coverage aligned bam will take ~6 hours using 48 threads, with comparable speed using `-p model` and `-p count`. 
+The current `-s, --chunksize` default of 500,000 requires 1-3 Gb memory per thread, using a 30X coverage aligned BAM. A 30X coverage aligned BAM will take ~6 hours using 48 threads, with comparable speed using `-p model` and `-p count`. 
 
 ## Changelog
 
