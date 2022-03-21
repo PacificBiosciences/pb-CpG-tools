@@ -73,8 +73,8 @@ The `-p, --pileup_mode` selects the method used to calculate modification probab
 - `count`: This method is simplistic. For a given site, the number of reads with a modification score of >0.5 and <0.5 are counted and the modification probability is given as a percentage.
 
 The `-m, --modsites` flag determines which sites will be reported. 
-- `denovo`: This option will only output a CG site if at least one read has a modification score > 0. Because of this, CG sites in the alignments with zero modification probability will not be reported. 
-- `reference`: This option will identify all CG sites in the reference and output all sites, regardless of modification scores. This mode does not ensure the aligned reads display a CG site (e.g., there may be sequence mismatches between reads and reference). 
+- `denovo`: This option will only output a CG site if at least one read has a modification score > 0. Because of this, any CG sites in the alignments with zero modification probability are not reported. 
+- `reference`: This option will identify and output all CG sites found in the reference sequences. This allows reporting of CG sites with zero modification probability. However, this mode does not ensure that aligned reads also display a CG site (e.g., there could be sequence mismatches between the reads and reference). 
 
 Using the `-a, --hap_tag` flag allows an arbitrary SAM tag to be used to identify haplotypes, rather than the default `HP` tag. The haplotype values must be `0`, `1`, and `2`, where `0` is not assigned/ambiguous.
 
@@ -84,7 +84,7 @@ There are bed format (`.bed`) and bigwig format (`.bw`) files generated for the 
 
 In addition, there are coverage filtered version of these files produced that are based on the minimum coverage value set for `-c, --min_coverage`. 
 
-A log file is also produced (`[label]-aligned_bam_to_cpg_scores.log`).
+A log file is also produced (`[label]-aligned_bam_to_cpg_scores.log`), which contains useful information.
 
 If haplotype information is absent, the following 4 files are expected:
 
