@@ -1,0 +1,14 @@
+name: cpg
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - tensorflow=2.7
+  - numpy=1.20.0
+  - biopython
+  - pandas
+  - pysam
+  - tqdm
+  - pybigwig
