@@ -112,7 +112,7 @@ If haplotype information is present, the following 12 files are expected:
 [label].hap2.[pileup_mode].mincov[X].bw
 ```
 
-The bed file columns will differ between the `-p model` and `-p count` methods, but both share the first 6 columns:
+The bed file columns will differ between the `-p model` and `-p count` methods, but both share the first six columns:
 
 1. reference name
 2. start coordinate
