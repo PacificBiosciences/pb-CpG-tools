@@ -13,7 +13,7 @@ There are several Python packages required to run the `aligned_bam_to_cpg_scores
 
 ```bash
 # create conda environment
-$ conda create -f conda_env_cpg.yaml
+$ conda env create -f conda_env_cpg.yaml
 
 # activate environment
 $ conda activate cpg
