@@ -302,8 +302,13 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag):
             continue
         # identify the haplotype tag, if any (default tag = HP)
         # values are 1 or 2 (for haplotypes), or 0 (no haplotype)
+        # an integer is expected but custom tags can produce strings instead
         try:
-            hap = read.get_tag(hap_tag)
+            hap_val = read.get_tag(hap_tag)
+            try:
+                hap = int(hap_val)
+            except ValueError:
+                logging.error("coordinates {}: {:,}-{:,}: (2) pileup_from_reads: illegal haplotype value {}".format(ref, pos_start, pos_stop, hap_val))
         except KeyError:
             hap = int(0)
         # check for SAM-spec methylation tags
