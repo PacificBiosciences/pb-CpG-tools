@@ -128,6 +128,12 @@ For `-p count`, four additional columns are present:
 9. avg mod score
 10. avg unmod score 
 
+For `-p model`, three additional columns are present:
+
+7. estimated modified site count (extrapolated from model modification probability)
+8. estimated unmodified site count (extrapolated from model modification probability)
+9. discretized modification probability (calculated from estimated mod/unmod site counts)
+
 The bigwig files are in an indexed binary format and contain columns 1-4 listed above, and are preferred for loading CpG/5mC tracks in IGV.
 
 ## Performance
