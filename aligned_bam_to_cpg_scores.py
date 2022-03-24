@@ -106,6 +106,14 @@ def setup_logging(output_label):
                         datefmt='%d-%b-%y %H:%M:%S',
                         level=logging.DEBUG)
 
+def log_args(args):
+    """
+    Record argument settings in log file.
+    """
+    logging.info("Using following argument settings:")
+    for arg, val in vars(args).items():
+        logging.info("\t--{}: {}".format(arg, val))
+
 def get_regions_to_process(input_bam, input_fasta, chunksize, modsites, pileup_mode, model_dir, min_mapq, hap_tag):
     """
     Breaks reference regions into smaller regions based on chunk
@@ -302,8 +310,13 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag):
             continue
         # identify the haplotype tag, if any (default tag = HP)
         # values are 1 or 2 (for haplotypes), or 0 (no haplotype)
+        # an integer is expected but custom tags can produce strings instead
         try:
-            hap = read.get_tag(hap_tag)
+            hap_val = read.get_tag(hap_tag)
+            try:
+                hap = int(hap_val)
+            except ValueError:
+                logging.error("coordinates {}: {:,}-{:,}: (2) pileup_from_reads: illegal haplotype value {}".format(ref, pos_start, pos_stop, hap_val))
         except KeyError:
             hap = int(0)
         # check for SAM-spec methylation tags
@@ -437,7 +450,7 @@ def collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict):
     calculated with calc_stats().
     For each position and strand/haploytpe combination, a sublist of summary information
     is appended to the bed_results list:
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage,
+    [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
     (6) mod sites, (7) unmod sites, (8) mod score, (9) unmod score]
     This information is used to write the output bed file.
 
@@ -503,12 +516,47 @@ def get_normalized_histo(df, adj):
     else:
         return
 
+def discretize_score(score, coverage):
+    """
+    Apply a small correction to the model probability to make it
+    compatible with the number of reads at that site. Allows the number
+    of modified and unmodified reads to be estimated.
+
+    :param score: Modification probability, from model. (float)
+    :param coverage: Number of reads. (int)
+    :return mod_reads: Estimated number of modified reads. (int)
+    :return unmod_reads: Estimated number of unmodified reads. (int)
+    :return adjusted_score: Adjusted probability score, based on percent modified reads. (float)
+    """
+    # need to round up or round down modified read numbers based on score
+    # which allows a push towards 0/50/100 for adjusted score
+    if score > 50:
+        if score < 65:
+            mod_reads = int(np.floor(score/100 * float(coverage)))
+        else:
+            mod_reads = int(np.ceil(score/100 * float(coverage)))
+    else:
+        if score > 35:
+            mod_reads = int(np.ceil(score/100 * float(coverage)))
+        else:
+            mod_reads = int(np.floor(score/100 * float(coverage)))
+
+    unmod_reads = int(coverage) - mod_reads
+
+    if mod_reads == 0:
+        adjusted_score = 0.0
+    else:
+        adjusted_score = round((mod_reads / (mod_reads + unmod_reads)) * 100, 1)
+
+    return mod_reads, unmod_reads, adjusted_score
+
+
 def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, model, hap):
     """
     Apply model to make modification calls for all sites using a sliding window approach.
     Create a list with results, ultimately for bed file:
-        [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage]
-
+        [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
+        (6) mod sites, (7) unmod sites, (8) adjusted probability]
     :param refpositions: List with all CG positions. (list)
     :param normhistos: List with all normalized histogram data structures. (list)
     :param coverages: List with all CG coverages. (list)
@@ -533,10 +581,11 @@ def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, m
         predict = np.where(predict > 1, 1, predict)
 
         for i, position in enumerate(refpositions):
-            temp_bed_results.append([ref, position, (position + 1), round(predict[i][0] * 100, 1), hap, coverages[i]])
-
+            model_score = round(predict[i][0] * 100, 1)
+            mod_reads, unmod_reads, adjusted_score = discretize_score(model_score, coverages[i])
+            temp_bed_results.append([ref, position, (position + 1), model_score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score])
     else:
-        logging.warning("coordinates {}: {:,}-{:,}: apply_model: insufficient data".format(ref, pos_start, pos_stop))
+        logging.warning("coordinates {}: {:,}-{:,}: apply_model: insufficient data for {}".format(ref, pos_start, pos_stop, hap))
 
     return temp_bed_results
 
@@ -545,7 +594,8 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir
     Iterates over reference positions and creates normalized histograms of scores,
     feeds all sites and scores into model function to assign modification probabilities,
     and creates a list of sublists for writing bed files:
-         [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage]
+        [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
+        (6) mod sites, (7) unmod sites, (8) adjusted probability]
     This information is returned and ultimately used to write the output bed file.
 
     :param ref: Reference name. (str)
@@ -632,7 +682,7 @@ def run_process_region(arguments):
     then runs collect_bed_results() to summarize information.
 
     The sublists will differ between model or count method, but they always share the first 7 elements:
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage, ...]
+    [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage, ...]
 
     :param arguments: Pickled list. (list)
     :return bed_results: List of sublists with information to write the output bed file. (list)
@@ -672,7 +722,7 @@ def run_all_pileup_processing(regions_to_process, threads):
     Collects results and returns list for writing output bed file.
 
     The bed results will differ based on model or count method, but they always share the first 7 elements:
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage, ...]
+    [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage, ...]
 
     :param regions_to_process: List of sublists defining regions (input_file, ref, pos_start, pos_stop). (list)
     :param threads: Number of threads to use for multiprocessing. (int)
@@ -707,12 +757,13 @@ def write_output_bed(label, modsites, min_coverage, bed_results):
     but the first 7 fields will be identical:
 
     count-based list
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage,
-    (6) mod sites, (7) unmod sites, (8) mod score, (9) unmod score]
+        [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
+        (6) mod sites, (7) unmod sites, (8) mod score, (9) unmod score]
 
     OR
     model-based list
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage]
+        [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
+        (6) mod sites, (7) unmod sites, (8) adjusted probability]
 
     :param outname: Name of output bed file to write. (str)
     :param modsites: "reference" or "denovo", for the CpG detection mode. (str)
@@ -771,12 +822,13 @@ def make_bed_df(bed, pileup_mode):
     Construct a pandas dataframe from a bed file.
 
     count-based list
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage,
-    (6) mod sites, (7) unmod sites, (8) mod score, (9) unmod score]
+        [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage,
+        (6) mod sites, (7) unmod sites, (8) mod score, (9) unmod score]
 
     OR
     model-based list
-    [(0) ref name, (1) start coord, (2) stop coord, (3) % mod sites, (4) haplotype, (5) coverage]
+        [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
+        (6) mod sites, (7) unmod sites, (8) adjusted probability]
 
     :param bed: Name of bed file.
     :param pileup_mode: Site modification calling method. (str: "model", "count")
@@ -785,14 +837,15 @@ def make_bed_df(bed, pileup_mode):
     logging.debug("make_bed_df: Converting '{}' to pandas dataframe.\n".format(bed))
     if pileup_mode == "count":
         df = pd.read_csv(bed, sep='\t', header=None,
-                         names = ['chromosome', 'start', 'stop', 'percent_modified', 'haplotype', 'coverage',
+                         names = ['chromosome', 'start', 'stop', 'mod_probability', 'haplotype', 'coverage',
                                   'modified_bases', 'unmodified_bases', 'mod_score', 'unmod_score'])
         df.drop(columns=['modified_bases', 'unmodified_bases', 'mod_score', 'unmod_score', 'haplotype', 'coverage'], inplace=True)
 
     elif pileup_mode == "model":
         df = pd.read_csv(bed, sep='\t', header=None,
-                         names = ['chromosome', 'start', 'stop', 'percent_modified', 'haplotype', 'coverage'])
-        df.drop(columns=['haplotype', 'coverage'], inplace=True)
+                         names = ['chromosome', 'start', 'stop', 'mod_probability', 'haplotype', 'coverage',
+                                  'modified_bases', 'unmodified_bases', 'adj_prob'])
+        df.drop(columns=['haplotype', 'coverage', 'modified_bases', 'unmodified_bases', 'adj_prob'], inplace=True)
 
     #df.sort_values(by=['chromosome', 'start'], inplace=True)
 
@@ -852,7 +905,7 @@ def write_bigwig_from_df(df, header, outname):
         bw.addEntries(list(temp_df["chromosome"]),
                       list(temp_df["start"]),
                       ends=list(temp_df["stop"]),
-                      values=list(temp_df["percent_modified"]))
+                      values=list(temp_df["mod_probability"]))
         logging.debug("\tFinished entries for '{}'.\n".format(chrom))
     # close bigwig object
     bw.close()
@@ -875,6 +928,7 @@ def convert_bed_to_bigwig(bed_files, fasta, pileup_mode):
 def main():
     args = get_args()
     setup_logging(args.output_label)
+    log_args(args)
 
     if args.pileup_mode == "model":
         if args.model_dir == None:
