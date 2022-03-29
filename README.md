@@ -136,9 +136,25 @@ For `-p model`, three additional columns are present:
 
 The bigwig files are in an indexed binary format and contain columns 1-4 listed above, and are preferred for loading CpG/5mC tracks in IGV.
 
+## Example Data
+
+An aligned BAM file containing HiFi reads with 5mC tags (`HG002.GRCh38.haplotagged.bam`) is freely available for download: https://downloads.pacbcloud.com/public/dataset/HG002-CpG-methylation-202202/
+
+The sample is HG002/NA24385 from the Human Pangenome Reference Consortium HG002 Data Freeze v1.0, and is aligned to GRCh38. There are also four unaligned bam files containing the HiFi reads. 
+
 ## Performance
 
-The current `-s, --chunksize` default of 500,000 requires 1-3 Gb memory per thread, using a 30X coverage aligned BAM. A 30X coverage aligned BAM will take ~6 hours using 48 threads, with comparable speed using `-p model` and `-p count`. 
+The current `-s, --chunksize` default of 500,000 requires 1-3 Gb memory per thread with a 30X coverage aligned BAM. A higher coverage dataset would use more memory per thread. 
+
+Benchmarks were run using the `HG002.GRCh38.haplotagged.bam` dataset described in the above section. Peak memory was estimated using 3Gb per thread. 
+
+| Threads (`-t`) | Chunk Size (`-s`) | Wall Time (h:m:s)  | Estimated Peak Memory  |
+| -------------- | ----------------- | ------------------ | ---------------------- |
+|        48      |  500000 (default) |       3:15:56      |          144 Gb        |
+|        36      |  500000 (default) |       3:58:06      |          108 Gb        |
+|        24      |  500000 (default) |       5:19:03      |           72 Gb        |
+|        12      |  500000 (default) |       8:58:01      |           36 Gb        |
+
 
 ## Changelog
 
