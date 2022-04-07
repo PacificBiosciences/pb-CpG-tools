@@ -73,8 +73,8 @@ The `-p, --pileup_mode` selects the method used to calculate modification probab
 - `count`: This method is simplistic. For a given site, the number of reads with a modification score of >0.5 and <0.5 are counted and the modification probability is given as a percentage.
 
 The `-m, --modsites` flag determines which sites will be reported. 
-- `denovo`: This option will only output a CG site if at least one read has a modification score > 0. Because of this, any CG sites in the alignments with zero modification probability are not reported. 
-- `reference`: This option will identify and output all CG sites found in the reference sequences. This allows reporting of CG sites with zero modification probability. However, this mode does not ensure that aligned reads also display a CG site (e.g., there could be sequence mismatches between the reads and reference). 
+- `denovo`: This option will identify and output all CG sites found in the consensus sequence from the reads in the pileup. This allows reporting of CG sites with zero modification probability. This mode does not ensure that the reference also displays a CG site (e.g., there could be sequence mismatches between the reads and reference). 
+- `reference`: This option will identify and output all CG sites found in the reference sequences. This allows reporting of CG sites with zero modification probability. This mode does not ensure that aligned reads also display a CG site (e.g., there could be sequence mismatches between the reads and reference). 
 
 Using the `-a, --hap_tag` flag allows an arbitrary SAM tag to be used to identify haplotypes, rather than the default `HP` tag. The haplotype values must be `0`, `1`, and `2`, where `0` is not assigned/ambiguous.
 

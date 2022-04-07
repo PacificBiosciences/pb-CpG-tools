@@ -11,6 +11,7 @@ import re
 from array import array
 from Bio import SeqIO
 from Bio.Seq import Seq
+from collections import Counter
 from multiprocessing import Pool
 from numpy.lib.stride_tricks import sliding_window_view
 from operator import itemgetter
@@ -24,7 +25,7 @@ def get_args():
     Get arguments from command line with argparse.
     """
     parser = argparse.ArgumentParser(
-        prog='RefAlnBam-to-ModsBed.py',
+        prog='aligned_bam_to_cpg_scores.py',
         description="""Calculate CpG positions and scores from an aligned bam file. Outputs raw and 
         coverage-filtered results in bed and bigwig format, including haplotype-specific results (when available).""")
 
@@ -43,7 +44,7 @@ def get_args():
     parser.add_argument("-p", "--pileup_mode",
                         required=False,
                         choices=["model", "count"],
-                        default="count",
+                        default="model",
                         help="Use a model-based approach to score modifications across sites (model) "
                              "or a simple count-based approach (count). [default = %(default)s]")
     parser.add_argument("-d", "--model_dir",
@@ -161,7 +162,7 @@ def cg_sites_from_fasta(input_fasta, ref):
 
     :param input_fasta: A path to reference fasta file. (str)
     :param ref: Reference name. (str)
-    :return cpg_sites_dict: Dictionary with all CG ref positions as keys, empty string vals. (dict)
+    :return cg_sites_ref_set: Set with all CG ref positions. (set)
     """
     # open fasta with BioPython and iterated over records
     with open(input_fasta) as fh:
@@ -169,19 +170,19 @@ def cg_sites_from_fasta(input_fasta, ref):
             # if record name matches this particular ref,
             if record.id == ref:
                 # use regex to find all indices for 'CG' in the reference seq, e.g. the C positions
-                cg_sites_dict = {i.start():"" for i in re.finditer('CG', str(record.seq.upper()))}
+                cg_sites_ref_set = {i.start() for i in re.finditer('CG', str(record.seq.upper()))}
                 # there may be some stretches without any CpGs in a reference region
                 # handle these edge cases by adding a dummy value of -1 (an impossible coordinate)
-                if not any(cg_sites_dict.keys()):
-                    cg_sites_dict[-1] = ""
+                if not cg_sites_ref_set:
+                    cg_sites_ref_set.add(-1)
                 # once seq is found, stop iterating
                 break
     # make sure the ref region was matched to a ref fasta seq
-    if not any(cg_sites_dict.keys()):
+    if not cg_sites_ref_set:
         logging.error("cg_sites_from_fasta: The sequence '{}' was not found in the reference fasta file.".format(ref))
         raise ValueError('The sequence "{}" was not found in the reference fasta file!'.format(ref))
 
-    return cg_sites_dict
+    return cg_sites_ref_set
 
 def get_mod_sequence(integers):
     """
@@ -280,7 +281,7 @@ def get_mod_dict(query_seq, mmtag, modcode, base, mltag, reverse):
     mod_dict = dict(zip(mod_base_indices, mod_scores))
     return mod_dict
 
-def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag):
+def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsites):
     """
     For a given region, retrieve all reads.
     For each read, iterate over positions aligned to this region.
@@ -298,10 +299,13 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag):
     :param pos_stop: Stop coordinate for region. (int)
     :param min_mapq: Minimum mapping quality score. (int)
     :param hap_tag: Name of SAM tag containing haplotype information. (str)
+    :param modsites: Filtering method. (str: "denovo", "reference")
     :return data_dict: Unfiltered dictionary with reference positions as keys, vals = list of lists. (dict)
+    :return cg_sites_read_set: Set of positions in read consensus sequence with CG, given as reference position. (set)
     """
     logging.debug("coordinates {}: {:,}-{:,}: (2) pileup_from_reads".format(ref, pos_start, pos_stop))
     data_dict = {}
+    refpos_column_dict = {}
     # iterate over all reads present in this region
     for read in bamIn.fetch(contig=ref, start=pos_start, stop=pos_stop):
         # check if passes minimum mapping quality score
@@ -346,6 +350,14 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag):
                 for query_pos, ref_pos in read.get_aligned_pairs(matches_only=True)[20:-20]:
                     # make sure ref position is in range of ref target region
                     if ref_pos >= pos_start and ref_pos <= pos_stop:
+                        # building a consensus is MUCH faster when we iterate over reads (vs. by column then by read)
+                        # we are building a dictionary with ref position as key and list of bases as val
+                        if modsites == "denovo":
+                            try:
+                                refpos_column_dict[ref_pos].append(read.query_sequence[query_pos])
+                            except KeyError:
+                                refpos_column_dict[ref_pos] = [read.query_sequence[query_pos]]
+                            
                         # identify if read is reverse strand or forward to set correct values
                         if read.is_reverse:
                             strand, location = "-", (len(read.query_sequence) - query_pos - 2)
@@ -367,9 +379,33 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag):
         else:
             logging.warning("pileup_from_reads: read missing MM and/or ML tag(s): {}".format(read.query_name))
 
-    return data_dict
+    if modsites == "denovo":
+        # initiate empty string to build consensus sequence
+        consensus_seq = ""
+        if refpos_column_dict:
+            # iterate over dict items where key = ref position, val = [base, base, base]
+            for k, v in sorted(refpos_column_dict.items()):
+                # find the most common base, if no reads present use N (this should not occur)
+                try:
+                    base = Counter(v).most_common(1)[0][0]
+                except:
+                    base = 'N'
+                # add to consensus sequence
+                consensus_seq += base
+        # make a dictionary with keys as consensus seq indices and vals as reference sequence indices
+        query_ref_site_dict = dict(zip(list(range(0, len(consensus_seq))), sorted(refpos_column_dict.keys())))
+        # identify all CG sites in the reads consensus, get the reference based position of these sites
+        cg_sites_read_set = {query_ref_site_dict[i.start()] for i in re.finditer('CG', consensus_seq)}
+        # there may be some stretches without any CGs in the consensus
+        # handle these edge cases by adding a dummy value of -1 (an impossible coordinate)
+        if not cg_sites_read_set:
+            cg_sites_read_set.add(-1)
+    else:
+        cg_sites_read_set = {-1}
 
-def filter_data_dict(data_dict, ref, pos_start, pos_stop, input_fasta, modsites):
+    return data_dict, cg_sites_read_set
+
+def filter_data_dict(data_dict, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites):
     """
     Filter the mod sites dictionary based on the modsites option selected:
     "reference": Keep all sites that match a reference CG site (this includes both
@@ -383,6 +419,7 @@ def filter_data_dict(data_dict, ref, pos_start, pos_stop, input_fasta, modsites)
     Return the filtered dictionary.
 
     :param data_dict: Dictionary object from pileup_from_reads(). (dict)
+    :param cg_sites_read_set: Set with reference coordinates for all CG sites in consensus from reads. (set)
     :param ref: A path to reference fasta file. (str)
     :param pos_start: Start coordinate for region. (int)
     :param pos_stop: Stop coordinate for region. (int)
@@ -394,35 +431,25 @@ def filter_data_dict(data_dict, ref, pos_start, pos_stop, input_fasta, modsites)
         # if there are alignments for this region, get all CG sites from the reference
         if data_dict:
             # get CG ref site positions from reference
-            cg_sites_dict = cg_sites_from_fasta(input_fasta, ref)
-        # if no alignments, skip the cpg sites step and give a dummy coord
+            cg_sites_ref_set = cg_sites_from_fasta(input_fasta, ref)
+            # keep all sites that match position of a reference CG site by
+            # doing a fast lookup of each potential site in the cg site set from the reference
+            filtered_dict = {k:v for (k,v) in data_dict.items() if k in cg_sites_ref_set}
+        # if no alignments, skip the cpg sites step and make empty dict
         else:
-            cg_sites_dict = {-1:""}
-        # keep all sites that match position of a reference CG site by
-        # doing a fast lookup of each potential site in the cpg dict
-        filtered_dict = {k:v for (k,v) in data_dict.items() if k in cg_sites_dict}
-        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_data_dict".format(ref, pos_start, pos_stop))
+            filtered_dict = {}
+        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_data_dict: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_dict)))
 
     elif modsites == "denovo":
-        # filter dictionary to remove strand-specific sites for which there are no modified bases present
-        # the values for each dict key are [[strand, modscore, hap], [strand, modscore, hap], ...]
-        # this method is NOT haplotype aware, it searches by strands only!
-        filtered_dict = {}
-        for k, v in data_dict.items():
-            # must check each strand separately for modified bases
-            # first check forward strand bases
-            if [j for j in [i for i in v if i[0] == "+"] if j[1] > 0.5]:
-                try:
-                    filtered_dict[k].extend([i for i in v if i[0] == "+"])
-                except:
-                    filtered_dict[k] = [i for i in v if i[0] == "+"]
-            # then check reverse strand bases
-            if [j for j in [i for i in v if i[0] == "-"] if j[1] > 0.5]:
-                try:
-                    filtered_dict[k].extend([i for i in v if i[0] == "-"])
-                except:
-                    filtered_dict[k] = [i for i in v if i[0] == "-"]
-        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_data_dict".format(ref, pos_start, pos_stop))
+        # if there are alignments for this region, get all CG sites from the reference
+        if data_dict:
+            # keep all sites that match position of a reference CG site by
+            # doing a fast lookup of each potential site in the cg site set from the reads
+            filtered_dict = {k:v for (k,v) in data_dict.items() if k in cg_sites_read_set}
+        # if no alignments, skip the cpg sites step and make empty dict
+        else:
+            filtered_dict = {}
+        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_data_dict: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_dict)))
 
     return filtered_dict
 
@@ -697,17 +724,20 @@ def run_process_region(arguments):
     # open the input bam file with pysam
     bamIn = pysam.AlignmentFile(input_bam, 'rb')
     # get all ref sites with mods and information from corresponding aligned reads
-    data_dict = pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag)
+    data_dict, cg_sites_read_set = pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsites)
     # filter based on denovo or reference sites
-    filtered_dict =  filter_data_dict(data_dict, ref, pos_start, pos_stop, input_fasta, modsites)
+    filtered_dict =  filter_data_dict(data_dict, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites)
     # bam object no longer needed, close file
     bamIn.close()
 
-    # summarize the mod results, depends on pileup_mode option selected
-    if pileup_mode == "count":
-        bed_results = collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict)
-    elif pileup_mode == "model":
-        bed_results = collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir)
+    if filtered_dict:
+        # summarize the mod results, depends on pileup_mode option selected
+        if pileup_mode == "count":
+            bed_results = collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict)
+        elif pileup_mode == "model":
+            bed_results = collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir)
+    else:
+        bed_results = []
 
     logging.debug("coordinates {}: {:,}-{:,}: (5) run_process_region: finish".format(ref, pos_start, pos_stop))
 
