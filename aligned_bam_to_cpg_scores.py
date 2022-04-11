@@ -305,7 +305,7 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
     """
     logging.debug("coordinates {}: {:,}-{:,}: (2) pileup_from_reads".format(ref, pos_start, pos_stop))
     data_dict = {}
-    refpos_column_dict = {}
+    refpos_column_dict, refpos_column_dict_hap1, refpos_column_dict_hap2 = {}, {}, {}
     # iterate over all reads present in this region
     for read in bamIn.fetch(contig=ref, start=pos_start, stop=pos_stop):
         # check if passes minimum mapping quality score
@@ -357,7 +357,17 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
                                 refpos_column_dict[ref_pos].append(read.query_sequence[query_pos])
                             except KeyError:
                                 refpos_column_dict[ref_pos] = [read.query_sequence[query_pos]]
-                            
+                            if hap == 1:
+                                try:
+                                    refpos_column_dict_hap1[ref_pos].append(read.query_sequence[query_pos])
+                                except KeyError:
+                                    refpos_column_dict_hap1[ref_pos] = [read.query_sequence[query_pos]]
+                            elif hap == 2:
+                                try:
+                                    refpos_column_dict_hap2[ref_pos].append(read.query_sequence[query_pos])
+                                except KeyError:
+                                    refpos_column_dict_hap2[ref_pos] = [read.query_sequence[query_pos]]
+
                         # identify if read is reverse strand or forward to set correct values
                         if read.is_reverse:
                             strand, location = "-", (len(read.query_sequence) - query_pos - 2)
@@ -380,22 +390,28 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
             logging.warning("pileup_from_reads: read missing MM and/or ML tag(s): {}".format(read.query_name))
 
     if modsites == "denovo":
-        # initiate empty string to build consensus sequence
-        consensus_seq = ""
-        if refpos_column_dict:
-            # iterate over dict items where key = ref position, val = [base, base, base]
-            for k, v in sorted(refpos_column_dict.items()):
-                # find the most common base, if no reads present use N (this should not occur)
-                try:
-                    base = Counter(v).most_common(1)[0][0]
-                except:
-                    base = 'N'
-                # add to consensus sequence
-                consensus_seq += base
-        # make a dictionary with keys as consensus seq indices and vals as reference sequence indices
-        query_ref_site_dict = dict(zip(list(range(0, len(consensus_seq))), sorted(refpos_column_dict.keys())))
-        # identify all CG sites in the reads consensus, get the reference based position of these sites
-        cg_sites_read_set = {query_ref_site_dict[i.start()] for i in re.finditer('CG', consensus_seq)}
+        cg_sites_read_set = set()
+        # initially only used combined haplotypes for this, but need to repeat for hap1 & hap2, if available
+        # some CGs are haplotype specific and are missed when haps are combined for consensus seq
+        for refpos_dict in [refpos_column_dict, refpos_column_dict_hap1, refpos_column_dict_hap2]:
+            if refpos_dict:
+                # initiate empty string to build consensus sequence
+                consensus_seq = ""
+                # iterate over dict items where key = ref position, val = [base, base, base]
+                for k, v in sorted(refpos_dict.items()):
+                    # find the most common base, if no reads present use N (this should not occur)
+                    try:
+                        base = Counter(v).most_common(1)[0][0]
+                    except:
+                        base = 'N'
+                    # add base to consensus sequence
+                    consensus_seq += base
+                # make a dictionary with keys as consensus seq indices and vals as reference sequence indices
+                query_ref_site_dict = dict(zip(list(range(0, len(consensus_seq))), sorted(refpos_dict.keys())))
+                # identify all CG sites in the reads consensus, get the reference based position of these sites
+                cg_sites_read_set_temp = {query_ref_site_dict[i.start()] for i in re.finditer('CG', consensus_seq)}
+                # update set with sites
+                cg_sites_read_set.update(cg_sites_read_set_temp)
         # there may be some stretches without any CGs in the consensus
         # handle these edge cases by adding a dummy value of -1 (an impossible coordinate)
         if not cg_sites_read_set:
