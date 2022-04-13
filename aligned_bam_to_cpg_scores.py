@@ -186,21 +186,19 @@ def cg_sites_from_fasta(input_fasta, ref):
 
 def get_mod_sequence(integers):
     """
-    Convert a list of integers coding mod bases from the SAM Mm tags into
-    a list of positions of sequential bases.
+    A generator that takes an iterable of integers coding mod bases from the SAM Mm tags, and yields an iterable of
+    positions of sequential bases.
     Example: [5, 12, 0] -> [6, 19, 20]
     In above example the 6th C, 19th C, and 20th C are modified
     See this example described in: https://samtools.github.io/hts-specs/SAMtags.pdf; Dec 9 2021
 
-    :param integers: List of integers (parsed from SAM Mm tag). (list)
-    :return mod_sequence: List of integers, 1-based counts of position of modified base in set of bases. (list)
+    :param integers: Iterable of integers (parsed from SAM Mm tag). (iter)
+    :return mod_sequence: Iterator of integers, 1-based counts of position of modified base in set of bases. (iter)
     """
-    mod_sequence = []
-    base_count = int(0)
+    base_count = 0
     for i in integers:
         base_count += i + 1
-        mod_sequence.append(base_count)
-    return mod_sequence
+        yield base_count
 
 def get_base_indices(query_seq, base, reverse):
     """
@@ -221,44 +219,40 @@ def get_base_indices(query_seq, base, reverse):
 
 def parse_mmtag(query_seq, mmtag, modcode, base, reverse):
     """
-    Get a list of the 0-based indices of the modified bases in
-    the query sequence.
+    Get a generator of the 0-based indices of the modified bases in the query sequence.
 
     :param query_seq: The original read sequence (not aligned read sequence). (str)
     :param mmtag: The Mm tag obtained for the read ('C+m,5,12,0;'). (str)
     :param modcode: The modification code to search for in the tag ('C+m'). (str)
     :param base: The nucleotide modifications occur on ('C'). (str)
     :param reverse: True/False whether sequence is reversed. (Boolean)
-    :return mod_base_indices: List of integers, 0-based indices of all mod bases in query seq. (list)
+    :return mod_base_indices: Generator of integers, 0-based indices of all mod bases in query seq. (iter)
     """
-    # tags are written as: C+m,5,12,0;C+h,5,12,0;
-    # if multiple mod types present in tag, must find relevant one first
-    modline = [x.replace(modcode + ',', '') for x in mmtag.split(';') if x.startswith(modcode)]
-    # gives a list with one sublist containing a string if mod type found: [["5,12,0"]]
-    if modline:
+    try:
+        # tags are written as: C+m,5,12,0;C+h,5,12,0;
+        # if multiple mod types present in tag, must find relevant one first
+        modline = next(x[len(modcode)+1:] for x in mmtag.split(';') if x.startswith(modcode))
         # first get the sequence of the mod bases from tag integers
         # this is a 1-based position of each mod base in the complete set of this base from this read
         # e.g., [6, 19, 20] = the 6th, 19th, and 20th C bases are modified in the set of Cs
-        mod_sequence = get_mod_sequence([int(x) for x in modline[0].split(',')])
+        mod_sequence = get_mod_sequence((int(x) for x in modline.split(',')))
         # get all 0-based indices of this base in this read, e.g. every C position
         base_indices = get_base_indices(query_seq, base, reverse)
         # use the mod sequence to identify indices of the mod bases in the read
-        mod_base_indices = [base_indices[i - 1] for i in mod_sequence]
-    else:
-        mod_base_indices = []
-
-    return mod_base_indices
+        return (base_indices[i - 1] for i in mod_sequence)
+    except:
+        return iter(())
 
 def parse_mltag(mltag):
     """
-    Convert 255 discrete integer code into mod score 0-1, return as list.
+    Convert 255 discrete integer code into mod score 0-1, return as a generator.
 
     This is NOT designed to handle interleaved Ml format for multiple mod types!
 
     :param mltag: The Ml tag obtained for the read with('Ml:B:C,204,89,26'). (str)
-    :return: List of floats, probabilities of all mod bases in query seq. (list)
+    :return: Generator of floats, probabilities of all mod bases in query seq. (iter)
     """
-    return [round(x / 256, 3) if x > 0 else 0 for x in mltag]
+    return (round(x / 256, 3) if x > 0 else 0 for x in mltag)
 
 def get_mod_dict(query_seq, mmtag, modcode, base, mltag, reverse):
     """
@@ -285,13 +279,12 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
     """
     For a given region, retrieve all reads.
     For each read, iterate over positions aligned to this region.
-    Build a dictionary with ref positions as keys. Each key will have a
-    value that is a list of sublists. Each sublist comes from a read
-    aligned to that site. The sublist will contain the strand information,
-    modification score, and haplotype:
-    [strand symbol (str), mod score (float), haplotype (int)]
+    Build a list with an entry for each ref position in the region. Each entry has a list of 3-tuples, each of which
+    includes information from a read base read aligned to that site. The 3-tuple contains strand information,
+    modification score, and haplotype.
+    (strand symbol (str), mod score (float), haplotype (int))
 
-    Return the unfiltered  dictionary.
+    Return the unfiltered list of base modification data.
 
     :param bamIn: AlignmentFile object of input bam file.
     :param ref: Reference name. (str)
@@ -300,12 +293,21 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
     :param min_mapq: Minimum mapping quality score. (int)
     :param hap_tag: Name of SAM tag containing haplotype information. (str)
     :param modsites: Filtering method. (str: "denovo", "reference")
-    :return data_dict: Unfiltered dictionary with reference positions as keys, vals = list of lists. (dict)
-    :return cg_sites_read_set: Set of positions in read consensus sequence with CG, given as reference position. (set)
+    :return basemod_data: Unfiltered list of base modification data (list)
+    :return cg_sites_read_set: Set of positions in read consensus sequence with CG, given as reference position. The
+     set is empty unless modsites is 'denovo' (set)
     """
     logging.debug("coordinates {}: {:,}-{:,}: (2) pileup_from_reads".format(ref, pos_start, pos_stop))
-    data_dict = {}
-    refpos_column_dict, refpos_column_dict_hap1, refpos_column_dict_hap2 = {}, {}, {}
+
+    basemod_data = []
+
+    # These structures are only used for modsites denovo mode
+    pos_pileup = []
+    pos_pileup_hap1 = []
+    pos_pileup_hap2 = []
+
+    is_denovo_modsites = modsites == "denovo"
+
     # iterate over all reads present in this region
     for read in bamIn.fetch(contig=ref, start=pos_start, stop=pos_stop):
         # check if passes minimum mapping quality score
@@ -322,7 +324,8 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
             except ValueError:
                 logging.error("coordinates {}: {:,}-{:,}: (2) pileup_from_reads: illegal haplotype value {}".format(ref, pos_start, pos_stop, hap_val))
         except KeyError:
-            hap = int(0)
+            hap = 0
+
         # check for SAM-spec methylation tags
         # draft tags were Ml and Mm, accepted tags are now ML and MM
         # check for both types, set defaults to None and change if found
@@ -339,91 +342,89 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
             pass
 
         if mmtag is not None and mltag is not None:
+            if not basemod_data:
+                ref_pos_count = 1 + pos_stop - pos_start
+
+                basemod_data = [[] for _ in range(ref_pos_count)]
+                if is_denovo_modsites:
+                    pos_pileup = [[] for _ in range(ref_pos_count)]
+                    pos_pileup_hap1 = [[] for _ in range(ref_pos_count)]
+                    pos_pileup_hap2 = [[] for _ in range(ref_pos_count)]
+
+            is_reverse = bool(read.is_reverse)
+            strand = "+"
+            if is_reverse :
+                strand = "-"
+            rev_strand_offset = len(read.query_sequence)  - 2
+
             # note that this could potentially be used for other mod types, but
             # the Mm and Ml parsing functions are not set up for the interleaved format
             # e.g.,  ‘Mm:Z:C+mh,5,12; Ml:B:C,204,26,89,130’ does NOT work
             # to work it must be one mod type, and one score per mod position
-            mod_dict = get_mod_dict(read.query_sequence, mmtag, 'C+m', 'C', mltag, read.is_reverse)
+            mod_dict = get_mod_dict(read.query_sequence, mmtag, 'C+m', 'C', mltag, is_reverse)
 
-            if read.get_aligned_pairs(matches_only=True)[20:-20]:
+            if True:
                 # iterate over positions
                 for query_pos, ref_pos in read.get_aligned_pairs(matches_only=True)[20:-20]:
                     # make sure ref position is in range of ref target region
                     if ref_pos >= pos_start and ref_pos <= pos_stop:
+                        ref_offset = ref_pos - pos_start
+
                         # building a consensus is MUCH faster when we iterate over reads (vs. by column then by read)
                         # we are building a dictionary with ref position as key and list of bases as val
-                        if modsites == "denovo":
-                            try:
-                                refpos_column_dict[ref_pos].append(read.query_sequence[query_pos])
-                            except KeyError:
-                                refpos_column_dict[ref_pos] = [read.query_sequence[query_pos]]
+                        if is_denovo_modsites:
+                            query_base = read.query_sequence[query_pos]
+                            pos_pileup[ref_offset].append(query_base)
                             if hap == 1:
-                                try:
-                                    refpos_column_dict_hap1[ref_pos].append(read.query_sequence[query_pos])
-                                except KeyError:
-                                    refpos_column_dict_hap1[ref_pos] = [read.query_sequence[query_pos]]
+                                pos_pileup_hap1[ref_offset].append(query_base)
                             elif hap == 2:
-                                try:
-                                    refpos_column_dict_hap2[ref_pos].append(read.query_sequence[query_pos])
-                                except KeyError:
-                                    refpos_column_dict_hap2[ref_pos] = [read.query_sequence[query_pos]]
+                                pos_pileup_hap2[ref_offset].append(query_base)
 
-                        # identify if read is reverse strand or forward to set correct values
-                        if read.is_reverse:
-                            strand, location = "-", (len(read.query_sequence) - query_pos - 2)
+                        # identify if read is reverse strand or forward to set correct location
+                        if is_reverse:
+                            location = (rev_strand_offset - query_pos)
                         else:
-                            strand, location = "+", query_pos
+                            location = query_pos
+
                         # check if this position has a mod score in the dictionary,
                         # if not assign score of zero
-                        if location not in mod_dict:
-                            score = 0
-                        else:
-                            score = mod_dict[location]
-                        # check if this reference position is a key in the dictionary yet
-                        # add sublist with strand, modification score, and haplotype to the value list
-                        try:
-                            data_dict[ref_pos].append([strand, score, hap])
-                        except KeyError:
-                            data_dict[ref_pos] = [[strand, score, hap]]
+                        score = mod_dict.get(location, 0)
+
+                        # Add tuple with strand, modification score, and haplotype to the list for this position
+                        basemod_data[ref_offset].append((strand, score, hap))
+
         # if no SAM-spec methylation tags present, ignore read and log
         else:
             logging.warning("pileup_from_reads: read missing MM and/or ML tag(s): {}".format(read.query_name))
 
-    if modsites == "denovo":
-        cg_sites_read_set = set()
-        # initially only used combined haplotypes for this, but need to repeat for hap1 & hap2, if available
-        # some CGs are haplotype specific and are missed when haps are combined for consensus seq
-        for refpos_dict in [refpos_column_dict, refpos_column_dict_hap1, refpos_column_dict_hap2]:
-            if refpos_dict:
-                # initiate empty string to build consensus sequence
-                consensus_seq = ""
-                # iterate over dict items where key = ref position, val = [base, base, base]
-                for k, v in sorted(refpos_dict.items()):
-                    # find the most common base, if no reads present use N (this should not occur)
-                    try:
-                        base = Counter(v).most_common(1)[0][0]
-                    except:
-                        base = 'N'
-                    # add base to consensus sequence
-                    consensus_seq += base
-                # make a dictionary with keys as consensus seq indices and vals as reference sequence indices
-                query_ref_site_dict = dict(zip(list(range(0, len(consensus_seq))), sorted(refpos_dict.keys())))
-                # identify all CG sites in the reads consensus, get the reference based position of these sites
-                cg_sites_read_set_temp = {query_ref_site_dict[i.start()] for i in re.finditer('CG', consensus_seq)}
-                # update set with sites
-                cg_sites_read_set.update(cg_sites_read_set_temp)
-        # there may be some stretches without any CGs in the consensus
-        # handle these edge cases by adding a dummy value of -1 (an impossible coordinate)
-        if not cg_sites_read_set:
-            cg_sites_read_set.add(-1)
-    else:
-        cg_sites_read_set = {-1}
+    cg_sites_read_set = set()
+    if is_denovo_modsites:
+        for refpos_list in (pos_pileup, pos_pileup_hap1, pos_pileup_hap2):
+            last_base = 'N'
+            last_index = 0
+            for index,v in enumerate(refpos_list):
+                # find the most common base, if no reads present use N
+                if len(v):
+                    base = Counter(v).most_common(1)[0][0]
+                else:
+                    base = 'N'
+                if last_base == 'C' and base == 'G' :
+                    cg_sites_read_set.add(pos_start+last_index)
 
-    return data_dict, cg_sites_read_set
+                # This restriction recreates the original code behavior:
+                # - Advantage: Method can find a CpG aligning across a deletion in the reference
+                # - Disadvantage: Method will find 'fake' CpG across gaps in the haplotype phasing
+                #
+                # The disadvantage is fixable, but first focus on identical output to make verification easy
+                if base != 'N':
+                    last_base = base
+                    last_index = index
 
-def filter_data_dict(data_dict, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites):
+    return basemod_data, cg_sites_read_set
+
+def filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites):
     """
-    Filter the mod sites dictionary based on the modsites option selected:
+    Filter the per-position base modification data, based on the modsites option selected:
     "reference": Keep all sites that match a reference CG site (this includes both
                  modified and unmodified sites). It will exclude all modified sites
                  that are not CG sites, according to the ref sequence.
@@ -432,42 +433,43 @@ def filter_data_dict(data_dict, cg_sites_read_set, ref, pos_start, pos_stop, inp
               It can exclude CG sites with no modifications on either strand from being
               written to the bed file.
 
-    Return the filtered dictionary.
+    Return the filtered list.
 
-    :param data_dict: Dictionary object from pileup_from_reads(). (dict)
+    :param basemod_data: List of base modification data per position, offset by pos_start. (list)
     :param cg_sites_read_set: Set with reference coordinates for all CG sites in consensus from reads. (set)
     :param ref: A path to reference fasta file. (str)
     :param pos_start: Start coordinate for region. (int)
     :param pos_stop: Stop coordinate for region. (int)
     :param modsites: Filtering method. (str: "denovo", "reference")
     :param ref: Reference name. (str)
-    :return filtered_dict: Dictionary with reference positions as keys, vals = list of lists. (dict)
+    :return filtered_basemod_data: List of 2-tuples for each position retained after filtering. Each 2-tuple is the
+    reference position and base mod data list. The list is sorted by reference position (list)
     """
+    filtered_basemod_data = []
     if modsites == "reference":
         # if there are alignments for this region, get all CG sites from the reference
-        if data_dict:
+        if basemod_data:
             # get CG ref site positions from reference
             cg_sites_ref_set = cg_sites_from_fasta(input_fasta, ref)
             # keep all sites that match position of a reference CG site by
             # doing a fast lookup of each potential site in the cg site set from the reference
-            filtered_dict = {k:v for (k,v) in data_dict.items() if k in cg_sites_ref_set}
-        # if no alignments, skip the cpg sites step and make empty dict
-        else:
-            filtered_dict = {}
-        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_data_dict: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_dict)))
+            filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_ref_set]
+
+        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_basemod_data)))
 
     elif modsites == "denovo":
         # if there are alignments for this region, get all CG sites from the reference
-        if data_dict:
+        if basemod_data:
             # keep all sites that match position of a reference CG site by
             # doing a fast lookup of each potential site in the cg site set from the reads
-            filtered_dict = {k:v for (k,v) in data_dict.items() if k in cg_sites_read_set}
+            filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_read_set]
         # if no alignments, skip the cpg sites step and make empty dict
-        else:
-            filtered_dict = {}
-        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_data_dict: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_dict)))
+        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_basemod_data)))
 
-    return filtered_dict
+    del basemod_data
+    del cg_sites_read_set
+
+    return filtered_basemod_data
 
 def calc_stats(df):
     """
@@ -485,10 +487,9 @@ def calc_stats(df):
 
     return percentMod, mod, unMod, modScore, unModScore
 
-def collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict):
+def collect_bed_results_count(ref, pos_start, pos_stop, filtered_basemod_data):
     """
-    Iterates over reference positions and corresponding sublists (k,v in filtered_dict).
-    For each position, makes a pandas dataframe from the sublists.
+    Iterates over reference positions and for each position, makes a pandas dataframe from the sublists.
     The dataframe is filtered for strands and haplotypes, and summary statistics are
     calculated with calc_stats().
     For each position and strand/haploytpe combination, a sublist of summary information
@@ -500,7 +501,8 @@ def collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict):
     :param ref: Reference name. (str)
     :param pos_start: Start coordinate for region. (int)
     :param pos_stop: Stop coordinate for region. (int)
-    :param filtered_dict: Dictionary from pileup_from_reads(). (dict)
+    :param filtered_basemod_data: List of 2-tuples for each position remaining after filtration. Each 2-tuple is the
+    reference position and base mod dat. The list is sorted by reference position (list)
     :return bed_results: List of sublists with information to write the output bed file. (list)
     """
     logging.debug("coordinates {}: {:,}-{:,}: (4) collect_bed_results_count".format(ref, pos_start, pos_stop))
@@ -508,7 +510,7 @@ def collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict):
     bed_results = []
 
     # iterate over the ref positions and corresponding vals
-    for refPosition, modinfoList in sorted(filtered_dict.items()):
+    for (refPosition, modinfoList) in filtered_basemod_data:
         # create pandas dataframe from this list of sublists
         df = pd.DataFrame(modinfoList, columns=['strand', 'prob', 'hap'])
 
@@ -534,30 +536,25 @@ def collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict):
 
     return bed_results
 
-def get_normalized_histo(df, adj):
+def get_normalized_histo(probs, adj):
     """
     Create the array data structure needed to apply the model, for a given site.
 
-    :param df: Pandas dataframe object, created from filtered_dict values containing ['strand', 'prob', 'hap'].
-    :param adj: A 0 or 1 indicating whether or not previous position was a CG. (int)
-    :return: List with normalized histogram and coverage (if min coverage met), else returns None. (list)
+    :param probs: List of methylation probabilities. (list)
+    :param adj: A 0 or 1 indicating whether previous position was a CG. (int)
+    :return: List with normalized histogram and coverage (if min coverage met), else returns empty list. (list)
     """
-    cov = df.shape[0]
+
+    cov = len(probs)
     if (cov >= 4):
-        # create array containing 21 zeroes
-        norm_hist = np.zeros(21, dtype=float)
-        # create histogram from pileup probability scores, range 0-1 with bin sizes of 0.05
-        # returns hist [0] and edges [1]
-        hist = np.histogram(df['prob'], bins=20, range=[0, 1])[0]
-        # get Euclidean norm for vector
+        hist = np.histogram(probs, bins=20, range=[0, 1])[0]
         norm = np.linalg.norm(hist)
         # divide hist by norm and add values to array
-        norm_hist[0:20] = hist / norm
         # add either 0 (not adjacent to a prior CG) or 1 (adjacent to a prior CG) to final spot in array
-        norm_hist[20] = adj
+        norm_hist = np.append(hist / norm, adj)
         return [norm_hist, cov]
     else:
-        return
+        return []
 
 def discretize_score(score, coverage):
     """
@@ -593,11 +590,10 @@ def discretize_score(score, coverage):
 
     return mod_reads, unmod_reads, adjusted_score
 
-
-def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, model, hap):
+def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, model, hap, bed_results):
     """
     Apply model to make modification calls for all sites using a sliding window approach.
-    Create a list with results, ultimately for bed file:
+    Append to a list of results, ultimately for bed file:
         [(0) ref name, (1) start coord, (2) stop coord, (3) mod probability, (4) haplotype, (5) coverage,
         (6) mod sites, (7) unmod sites, (8) adjusted probability]
     :param refpositions: List with all CG positions. (list)
@@ -608,31 +604,25 @@ def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, m
     :param pos_stop: Stop coordinate for region. (int)
     :param model: The tensorflow model object.
     :param hap: Label of haplotype (hap1, hap2, or Total). (str)
-    :return temp_bed_results: List of information for bed files, but can possibly be blank. (list)
+    :param bed_results: List of bed results to which these model results will be appended (list)
     """
-    temp_bed_results = []
-
     if len(normhistos) > 11:
-
         featPad = np.pad(np.stack(normhistos), pad_width=((6, 4), (0, 0)), mode='constant', constant_values=0)
         featuresWindow = sliding_window_view(featPad, 11, axis=0)
 
         featuresWindow = np.swapaxes(featuresWindow, 1, 2)
         predict = model.predict(featuresWindow)
 
-        predict = np.where(predict < 0, 0, predict)
-        predict = np.where(predict > 1, 1, predict)
+        predict = np.clip(predict, 0, 1)
 
         for i, position in enumerate(refpositions):
             model_score = round(predict[i][0] * 100, 1)
             mod_reads, unmod_reads, adjusted_score = discretize_score(model_score, coverages[i])
-            temp_bed_results.append([ref, position, (position + 1), model_score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score])
+            bed_results.append((ref, position, (position + 1), model_score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score))
     else:
         logging.warning("coordinates {}: {:,}-{:,}: apply_model: insufficient data for {}".format(ref, pos_start, pos_stop, hap))
 
-    return temp_bed_results
-
-def collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir):
+def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, model_dir):
     """
     Iterates over reference positions and creates normalized histograms of scores,
     feeds all sites and scores into model function to assign modification probabilities,
@@ -644,7 +634,8 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir
     :param ref: Reference name. (str)
     :param pos_start: Start coordinate for region. (int)
     :param pos_stop: Stop coordinate for region. (int)
-    :param filtered_dict: Dictionary from pileup_from_reads(). (dict)
+    :param filtered_basemod_data: List of 2-tuples for each position remaining after filtration. Each 2-tuple is the
+    reference position and base mod dat. The list is sorted by reference position (list)
     :param model_dir: Full path to directory containing model. (str)
     :return bed_results: List of sublists with information to write the output bed file. (list)
     """
@@ -666,8 +657,8 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir
 
     # set initial C index for CG location to 0
     previousLocation = 0
-    # iterate over keys (reference positions) and values (list containing [strand, score, hap]) in filtered_dict
-    for refPosition, modinfoList in sorted(filtered_dict.items()):
+    # iterate over reference positions and values (list containing [strand, score, hap]) in filtered_basemod_data
+    for (refPosition, modinfoList) in filtered_basemod_data:
         # determine if there is an adjacent prior CG, score appropriately
         if (refPosition - previousLocation) == 2:
             adj = 1
@@ -676,25 +667,23 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir
         # update CG position
         previousLocation = refPosition
 
-        # create pandas dataframe from this list of sublists
-        df = pd.DataFrame(modinfoList, columns=['strand', 'prob', 'hap'])
         # build lists for combined haplotypes
         # returns [norm_hist, cov] if min coverage met, otherwise returns empty list
-        total_result_list = get_normalized_histo(df, adj)
+        total_result_list = get_normalized_histo([x[1] for x in modinfoList], adj)
         if total_result_list:
             total_normhistos.append(total_result_list[0])
             total_coverages.append(total_result_list[1])
             total_refpositions.append(refPosition)
 
         # build lists for hap1
-        hap1_result_list = get_normalized_histo(df[df['hap'] == 1], adj)
+        hap1_result_list = get_normalized_histo([x[1] for x in modinfoList if x[2] == 1], adj)
         if hap1_result_list:
             hap1_normhistos.append(hap1_result_list[0])
             hap1_coverages.append(hap1_result_list[1])
             hap1_refpositions.append(refPosition)
 
         # build lists for hap2
-        hap2_result_list = get_normalized_histo(df[df['hap'] == 2], adj)
+        hap2_result_list = get_normalized_histo([x[1] for x in modinfoList if x[2] == 2], adj)
         if hap2_result_list:
             hap2_normhistos.append(hap2_result_list[0])
             hap2_coverages.append(hap2_result_list[1])
@@ -703,17 +692,9 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir
     # initiate empty list to store all bed results
     bed_results = []
     # run model for total, hap1, hap2, and add to bed results if non-empty list was returned
-    total_temp_bed_results = (apply_model(total_refpositions, total_normhistos, total_coverages, ref, pos_start, pos_stop, model, "Total"))
-    if total_temp_bed_results:
-        bed_results.extend(total_temp_bed_results)
-
-    hap1_temp_bed_results = (apply_model(hap1_refpositions, hap1_normhistos, hap1_coverages, ref, pos_start, pos_stop, model, "hap1"))
-    if hap1_temp_bed_results:
-        bed_results.extend(hap1_temp_bed_results)
-
-    hap2_temp_bed_results = (apply_model(hap2_refpositions, hap2_normhistos, hap2_coverages, ref, pos_start, pos_stop, model, "hap2"))
-    if hap2_temp_bed_results:
-        bed_results.extend(hap2_temp_bed_results)
+    apply_model(total_refpositions, total_normhistos, total_coverages, ref, pos_start, pos_stop, model, "Total", bed_results)
+    apply_model(hap1_refpositions, hap1_normhistos, hap1_coverages, ref, pos_start, pos_stop, model, "hap1", bed_results)
+    apply_model(hap2_refpositions, hap2_normhistos, hap2_coverages, ref, pos_start, pos_stop, model, "hap2", bed_results)
 
     return bed_results
 
@@ -740,18 +721,18 @@ def run_process_region(arguments):
     # open the input bam file with pysam
     bamIn = pysam.AlignmentFile(input_bam, 'rb')
     # get all ref sites with mods and information from corresponding aligned reads
-    data_dict, cg_sites_read_set = pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsites)
+    basemod_data, cg_sites_read_set = pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsites)
     # filter based on denovo or reference sites
-    filtered_dict =  filter_data_dict(data_dict, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites)
+    filtered_basemod_data =  filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites)
     # bam object no longer needed, close file
     bamIn.close()
 
-    if filtered_dict:
+    if filtered_basemod_data:
         # summarize the mod results, depends on pileup_mode option selected
         if pileup_mode == "count":
-            bed_results = collect_bed_results_count(ref, pos_start, pos_stop, filtered_dict)
+            bed_results = collect_bed_results_count(ref, pos_start, pos_stop, filtered_basemod_data)
         elif pileup_mode == "model":
-            bed_results = collect_bed_results_model(ref, pos_start, pos_stop, filtered_dict, model_dir)
+            bed_results = collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, model_dir)
     else:
         bed_results = []
 
