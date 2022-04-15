@@ -447,23 +447,19 @@ def filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_sto
     """
     filtered_basemod_data = []
     if modsites == "reference":
-        # if there are alignments for this region, get all CG sites from the reference
         if basemod_data:
-            # get CG ref site positions from reference
+            # Get CG positions in reference
             cg_sites_ref_set = cg_sites_from_fasta(input_fasta, ref)
-            # keep all sites that match position of a reference CG site by
-            # doing a fast lookup of each potential site in the cg site set from the reference
-            filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_ref_set]
+            # Keep all sites that match a reference CG position and have at least one basemod observation.
+            filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_ref_set and v]
 
         logging.debug("coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_basemod_data)))
 
     elif modsites == "denovo":
-        # if there are alignments for this region, get all CG sites from the reference
         if basemod_data:
-            # keep all sites that match position of a reference CG site by
-            # doing a fast lookup of each potential site in the cg site set from the reads
+            # Keep all sites that match position of a read consensus CG site.
             filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_read_set]
-        # if no alignments, skip the cpg sites step and make empty dict
+
         logging.debug("coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_basemod_data)))
 
     del basemod_data
