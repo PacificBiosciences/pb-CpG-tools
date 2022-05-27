@@ -9,6 +9,7 @@ import pyBigWig
 import pysam
 import os
 import re
+import sys
 from Bio import SeqIO
 from Bio.Seq import Seq
 from collections import Counter
@@ -738,7 +739,6 @@ def run_process_region(arguments):
 
 
 def run_process_region_wrapper(arguments):
-    import sys
     try:
         return run_process_region(arguments)
     except Exception as e:
@@ -760,13 +760,19 @@ def run_all_pileup_processing(regions_to_process, threads):
     """
     logging.info("run_all_pileup_processing: Starting parallel processing.\n")
     # run all jobs
-    progress_bar = tqdm(total=len(regions_to_process), miniters=1, smoothing=0)
+
+    progress_bar = None
+    if sys.stderr.isatty():
+        progress_bar = tqdm(total=len(regions_to_process), miniters=1, smoothing=0)
+
     bed_results = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         for bed_result in executor.map(run_process_region_wrapper, regions_to_process):
             bed_results.append(bed_result)
-            progress_bar.update(1)
-    progress_bar.close()
+            if progress_bar:
+                progress_bar.update(1)
+    if progress_bar:
+        progress_bar.close()
 
     logging.info("run_all_pileup_processing: Finished parallel processing.\n")
     # results is a list of sublists, may contain None, remove these
