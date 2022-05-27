@@ -767,10 +767,15 @@ def run_all_pileup_processing(regions_to_process, threads):
 
     bed_results = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        for bed_result in executor.map(run_process_region_wrapper, regions_to_process):
+        futures = [executor.submit(run_process_region_wrapper, r) for r in regions_to_process]
+
+        # Process results in order of completion
+        for future in concurrent.futures.as_completed(futures):
+            bed_result = future.result()
             bed_results.append(bed_result)
             if progress_bar:
                 progress_bar.update(1)
+
     if progress_bar:
         progress_bar.close()
 
