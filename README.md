@@ -148,12 +148,12 @@ The current `-s, --chunksize` default of 500,000 requires 1-3 Gb memory per thre
 
 Benchmarks were run using the `HG002.GRCh38.haplotagged.bam` dataset described in the above section. Peak memory was estimated using 3Gb per thread. 
 
-| Threads (`-t`) | Chunk Size (`-s`) | Wall Time (h:m:s)  | Estimated Peak Memory  |
-| -------------- | ----------------- | ------------------ | ---------------------- |
-|        48      |  500000 (default) |       3:15:56      |          144 Gb        |
-|        36      |  500000 (default) |       3:58:06      |          108 Gb        |
-|        24      |  500000 (default) |       5:19:03      |           72 Gb        |
-|        12      |  500000 (default) |       8:58:01      |           36 Gb        |
+| Threads (`-t`) | Chunk Size (`-s`) | Wall Time (`h:m:s`) | Estimated Peak Memory  |
+| -------------- | ----------------- |-------------------| ---------------------- |
+|        48      |  500000 (default) | 3:15:56           |          144 Gb        |
+|        36      |  500000 (default) | 3:58:06           |          108 Gb        |
+|        24      |  500000 (default) | 5:19:03           |           72 Gb        |
+|        12      |  500000 (default) | 8:58:01           |           36 Gb        |
 
 
 ## Changelog
