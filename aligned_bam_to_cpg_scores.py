@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 import argparse
+import concurrent.futures
 import logging
 import numpy as np
 import pandas as pd
@@ -8,16 +9,12 @@ import pyBigWig
 import pysam
 import os
 import re
-from array import array
 from Bio import SeqIO
 from Bio.Seq import Seq
 from collections import Counter
-from multiprocessing import Pool
 from numpy.lib.stride_tricks import sliding_window_view
 from operator import itemgetter
-from tqdm import tqdm, trange
-from tqdm.contrib.concurrent import process_map
-from scipy.stats import spearmanr
+from tqdm import tqdm
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 def get_args():
@@ -739,6 +736,16 @@ def run_process_region(arguments):
     else:
         return
 
+
+def run_process_region_wrapper(arguments):
+    import sys
+    try:
+        return run_process_region(arguments)
+    except Exception as e:
+        sys.stderr.write("Exception thrown in worker process {}: {}\n".format(os.getpid(),e))
+        raise
+
+
 def run_all_pileup_processing(regions_to_process, threads):
     """
     Function to distribute jobs based on reference regions created.
@@ -752,10 +759,15 @@ def run_all_pileup_processing(regions_to_process, threads):
     :return filtered_bed_results: List of sublists with information to write the output bed file. (list)
     """
     logging.info("run_all_pileup_processing: Starting parallel processing.\n")
-    # set threads
-    pool = Pool(processes=threads)
     # run all jobs
-    bed_results = process_map(run_process_region, regions_to_process, max_workers=threads, miniters=threads, chunksize=1, smoothing=0)
+    progress_bar = tqdm(total=len(regions_to_process), miniters=1, smoothing=0)
+    bed_results = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        for bed_result in executor.map(run_process_region_wrapper, regions_to_process):
+            bed_results.append(bed_result)
+            progress_bar.update(1)
+    progress_bar.close()
+
     logging.info("run_all_pileup_processing: Finished parallel processing.\n")
     # results is a list of sublists, may contain None, remove these
     filtered_bed_results = [i for i in bed_results if i]
