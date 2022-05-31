@@ -51,8 +51,7 @@ Mandatory arguments:
 Optional arguments:
   -p, --pileup_mode     count/model    Use a model-based approach to score modifications across sites 
                                        (model) or a simple count-based approach (count). [count]
-  -d, --model_dir       STR     Full path to the directory containing the model (*.pb files) to 
-                                load. [None]
+  --model_file          STR     Full path to the tensorflow lite model (*.tflite) [default = None]
   -m, --modsites        denovo/reference    Only output CG sites with a mod probability > 0 (denovo), 
                                             or output all CG sites based on the supplied reference 
                                             fasta (reference). [denovo]
@@ -69,7 +68,10 @@ Optional arguments:
 #### Details
 
 The `-p, --pileup_mode` selects the method used to calculate modification probabilities.
-- `model`: This approach is preferred. It uses distributions of modification scores and a machine-learning model to calculate the modification probabilities across CG sites. Using this option requires providing the path to the directory containing the model files with the `-d, --model_dir` flag. The required model is available in the `pileup_calling_model/` directory. 
+- `model`: This approach is preferred. It uses distributions of modification scores and a machine-learning model to
+calculate the modification probabilities across CG sites. Using this option requires providing the path to the
+tensorflow lite model file (ending in *.tflite) with the `--model_file` flag. The recommended model is provided in the
+file `pileup_calling_model.tflite` in this repository.
 - `count`: This method is simplistic. For a given site, the number of reads with a modification score of >0.5 and <0.5 are counted and the modification probability is given as a percentage.
 
 The `-m, --modsites` flag determines which sites will be reported. 

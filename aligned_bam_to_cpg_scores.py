@@ -45,11 +45,11 @@ def get_args():
                         default="model",
                         help="Use a model-based approach to score modifications across sites (model) "
                              "or a simple count-based approach (count). [default = %(default)s]")
-    parser.add_argument("-d", "--model_dir",
+    parser.add_argument("--model_file",
                         required=False,
                         default=None,
-                        metavar="/path/to/model/dir",
-                        help="Full path to the directory containing the model (*.pb files) to load. [default = None]")
+                        metavar="/path/to/model/file",
+                        help="Full path to the tensorflow lite model (*.tflite) [default = None]")
     parser.add_argument("-m", "--modsites",
                         required=False,
                         choices=["denovo", "reference"],
@@ -90,6 +90,7 @@ def get_args():
 
     return parser.parse_args()
 
+
 def setup_logging(output_label):
     """
     Set up logging to file.
@@ -104,6 +105,26 @@ def setup_logging(output_label):
                         format="%(asctime)s: %(levelname)s: %(message)s",
                         datefmt='%d-%b-%y %H:%M:%S',
                         level=logging.DEBUG)
+
+
+def validate_args(args):
+    def error_exit(msg):
+        logging.error(msg)
+        sys.exit(2)
+
+    def check_file(filename, label):
+        if not os.path.isfile(filename):
+            error_exit(f"Can't find {label} file '{filename}'")
+
+    check_file(args.bam,"bam")
+    check_file(args.fasta,"fasta")
+
+    if args.model_file is None :
+        if pileup_mode == "model":
+            error_exit("Model file must be specified when pileup_mode is 'model'.")
+    if args.model_file is not None:
+        check_file(args.model_file, "model")
+
 
 def log_args(args):
     """
@@ -584,7 +605,7 @@ def discretize_score(score, coverage):
 
     return mod_reads, unmod_reads, adjusted_score
 
-def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, model, hap, bed_results):
+def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, interpreter, hap, bed_results):
     """
     Apply model to make modification calls for all sites using a sliding window approach.
     Append to a list of results, ultimately for bed file:
@@ -596,7 +617,7 @@ def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, m
     :param ref: Reference contig name. (str)
     :param pos_start: Start coordinate for region. (int)
     :param pos_stop: Stop coordinate for region. (int)
-    :param model: The tensorflow model object.
+    :param interpreter: The tensorflow lite interpreter object.
     :param hap: Label of haplotype (hap1, hap2, or Total). (str)
     :param bed_results: List of bed results to which these model results will be appended (list)
     """
@@ -605,14 +626,26 @@ def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, m
         featuresWindow = sliding_window_view(featPad, 11, axis=0)
 
         featuresWindow = np.swapaxes(featuresWindow, 1, 2)
-        predict = model.predict(featuresWindow)
+        featuresWindow = np.float32(featuresWindow)
+
+        # Get input and output tensors.
+        interpreter.allocate_tensors()
+        input_index = interpreter.get_input_details()[0]['index']
+        output_index = interpreter.get_output_details()[0]['index']
+
+        predict = np.array([])
+        for i in range(len(normhistos)):
+            interpreter.set_tensor(input_index, featuresWindow[i:i + 1, ])
+            interpreter.invoke()
+            f = interpreter.get_tensor(output_index)
+            predict = np.append(predict, f)
 
         predict = np.clip(predict, 0, 1)
 
         for i, position in enumerate(refpositions):
-            model_score = round(predict[i][0] * 100, 1)
-            mod_reads, unmod_reads, adjusted_score = discretize_score(model_score, coverages[i])
-            bed_results.append((ref, position, (position + 1), model_score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score))
+            score = round(predict[i] * 100, 1)
+            mod_reads, unmod_reads, adjusted_score = discretize_score(score, coverages[i])
+            bed_results.append((ref, position, (position + 1), score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score))
     else:
         logging.warning("coordinates {}: {:,}-{:,}: apply_model: insufficient data for {}".format(ref, pos_start, pos_stop, hap))
 
@@ -643,7 +676,7 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, m
     #tf.config.threading.set_intra_op_parallelism_threads(1)
     #tf.config.threading.set_inter_op_parallelism_threads(1)
 
-    model = tf.keras.models.load_model(model_dir, compile=False)
+    interpreter = tf.lite.Interpreter(model_dir + ".tflite")
 
     total_refpositions, total_normhistos, total_coverages = [], [], []
     hap1_refpositions, hap1_normhistos, hap1_coverages = [], [], []
@@ -686,9 +719,9 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, m
     # initiate empty list to store all bed results
     bed_results = []
     # run model for total, hap1, hap2, and add to bed results if non-empty list was returned
-    apply_model(total_refpositions, total_normhistos, total_coverages, ref, pos_start, pos_stop, model, "Total", bed_results)
-    apply_model(hap1_refpositions, hap1_normhistos, hap1_coverages, ref, pos_start, pos_stop, model, "hap1", bed_results)
-    apply_model(hap2_refpositions, hap2_normhistos, hap2_coverages, ref, pos_start, pos_stop, model, "hap2", bed_results)
+    apply_model(total_refpositions, total_normhistos, total_coverages, ref, pos_start, pos_stop, interpreter, "Total", bed_results)
+    apply_model(hap1_refpositions, hap1_normhistos, hap1_coverages, ref, pos_start, pos_stop, interpreter, "hap1", bed_results)
+    apply_model(hap2_refpositions, hap2_normhistos, hap2_coverages, ref, pos_start, pos_stop, interpreter, "hap2", bed_results)
 
     return bed_results
 
@@ -974,6 +1007,7 @@ def convert_bed_to_bigwig(bed_files, fasta, pileup_mode):
 def main():
     args = get_args()
     setup_logging(args.output_label)
+    validate_args(args)
     log_args(args)
 
     if args.pileup_mode == "model":
