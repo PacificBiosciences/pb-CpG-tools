@@ -163,6 +163,8 @@ def cg_sites_from_fasta(input_fasta, ref):
     :return cg_sites_ref_set: Set with all CG ref positions. (set)
     """
     # open fasta with BioPython and iterated over records
+    cg_sites_ref_set = set()
+
     with open(input_fasta) as fh:
         for record in SeqIO.parse(fh, "fasta"):
             # if record name matches this particular ref,
