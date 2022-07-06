@@ -16,7 +16,9 @@ from collections import Counter
 from numpy.lib.stride_tricks import sliding_window_view
 from operator import itemgetter
 from tqdm import tqdm
+
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
 
 def get_args():
     """
@@ -90,6 +92,7 @@ def get_args():
 
     return parser.parse_args()
 
+
 def setup_logging(output_label):
     """
     Set up logging to file.
@@ -105,6 +108,7 @@ def setup_logging(output_label):
                         datefmt='%d-%b-%y %H:%M:%S',
                         level=logging.DEBUG)
 
+
 def log_args(args):
     """
     Record argument settings in log file.
@@ -112,6 +116,7 @@ def log_args(args):
     logging.info("Using following argument settings:")
     for arg, val in vars(args).items():
         logging.info("\t--{}: {}".format(arg, val))
+
 
 def get_regions_to_process(input_bam, input_fasta, chunksize, modsites, pileup_mode, model_dir, min_mapq, hap_tag):
     """
@@ -143,15 +148,18 @@ def get_regions_to_process(input_bam, input_fasta, chunksize, modsites, pileup_m
         while start < length:
             end = start + chunksize
             if end < length:
-                regions_to_process.append([input_bam, input_fasta, modsites, pileup_mode, model_dir, ref, start, end - 1, min_mapq, hap_tag])
+                regions_to_process.append(
+                    [input_bam, input_fasta, modsites, pileup_mode, model_dir, ref, start, end - 1, min_mapq, hap_tag])
             else:
-                regions_to_process.append([input_bam, input_fasta, modsites, pileup_mode, model_dir, ref, start, length, min_mapq, hap_tag])
+                regions_to_process.append(
+                    [input_bam, input_fasta, modsites, pileup_mode, model_dir, ref, start, length, min_mapq, hap_tag])
             start = start + chunksize
     # close bam
     bamIn.close()
     logging.info("get_regions_to_process: Created {:,} region chunks.\n".format(len(regions_to_process)))
 
     return regions_to_process
+
 
 def cg_sites_from_fasta(input_fasta, ref):
     """
@@ -184,6 +192,7 @@ def cg_sites_from_fasta(input_fasta, ref):
 
     return cg_sites_ref_set
 
+
 def get_mod_sequence(integers):
     """
     A generator that takes an iterable of integers coding mod bases from the SAM Mm tags, and yields an iterable of
@@ -199,6 +208,7 @@ def get_mod_sequence(integers):
     for i in integers:
         base_count += i + 1
         yield base_count
+
 
 def get_base_indices(query_seq, base, reverse):
     """
@@ -217,42 +227,64 @@ def get_base_indices(query_seq, base, reverse):
     else:
         return [i.start() for i in re.finditer(base, str(Seq(query_seq).reverse_complement()))]
 
+
 def parse_mmtag(query_seq, mmtag, modcode, base, reverse):
     """
-    Get a generator of the 0-based indices of the modified bases in the query sequence.
+    Get a list of the 0-based indices of the modified bases in the query sequence.
 
     :param query_seq: The original read sequence (not aligned read sequence). (str)
     :param mmtag: The Mm tag obtained for the read ('C+m,5,12,0;'). (str)
     :param modcode: The modification code to search for in the tag ('C+m'). (str)
     :param base: The nucleotide modifications occur on ('C'). (str)
     :param reverse: True/False whether sequence is reversed. (Boolean)
-    :return mod_base_indices: Generator of integers, 0-based indices of all mod bases in query seq. (iter)
+    :return mod_base_indices: List of integers, 0-based indices of all mod bases in query seq. (list)
     """
-    try:
-        # tags are written as: C+m,5,12,0;C+h,5,12,0;
-        # if multiple mod types present in tag, must find relevant one first
-        modline = next(x[len(modcode)+1:] for x in mmtag.split(';') if x.startswith(modcode))
-        # first get the sequence of the mod bases from tag integers
-        # this is a 1-based position of each mod base in the complete set of this base from this read
-        # e.g., [6, 19, 20] = the 6th, 19th, and 20th C bases are modified in the set of Cs
-        mod_sequence = get_mod_sequence((int(x) for x in modline.split(',')))
-        # get all 0-based indices of this base in this read, e.g. every C position
-        base_indices = get_base_indices(query_seq, base, reverse)
-        # use the mod sequence to identify indices of the mod bases in the read
-        return (base_indices[i - 1] for i in mod_sequence)
-    except:
-        return iter(())
+
+    def get_modline():
+        """
+        tags are written as: C+m,5,12,0;C+h,5,12,0;
+        if multiple mod types present in tag, must find relevant one first
+        """
+        for x in mmtag.split(';'):
+            if not x.startswith(modcode): continue
+            return x[len(modcode) + 1:]
+        return None
+
+    modline = get_modline()
+    if modline is None:
+        return []
+
+    # Get the sequence of the mod bases from tag integers
+    # this is a 1-based position of each mod base in the complete set of this base from this read
+    # e.g., [6, 19, 20] = the 6th, 19th, and 20th C bases are modified in the set of Cs
+    mod_sequence = get_mod_sequence((int(x) for x in modline.split(',')))
+
+    # Get all 0-based indices of this base in this read, e.g. every C position
+    base_indices = get_base_indices(query_seq, base, reverse)
+
+    # Use the mod sequence to identify indices of the mod bases in the read
+    mod_base_indices = []
+    base_indices_size = len(base_indices)
+    for i in mod_sequence:
+        if i <= 0 or i > base_indices_size:
+            raise Exception(
+                f"Base modification offsets in MM tag for modification type '{modcode}' are inconsistent with read length")
+        mod_base_indices.append(base_indices[i - 1])
+
+    return mod_base_indices
+
 
 def parse_mltag(mltag):
     """
-    Convert 255 discrete integer code into mod score 0-1, return as a generator.
+    Convert 255 discrete integer code into mod score 0-1, return as a list.
 
     This is NOT designed to handle interleaved Ml format for multiple mod types!
 
     :param mltag: The Ml tag obtained for the read with('Ml:B:C,204,89,26'). (str)
-    :return: Generator of floats, probabilities of all mod bases in query seq. (iter)
+    :return: List of floats, probabilities of all mod bases in query seq. (list)
     """
-    return (round(x / 256, 3) if x > 0 else 0 for x in mltag)
+    return [round(x / 256, 3) if x > 0 else 0 for x in mltag]
+
 
 def get_mod_dict(query_seq, mmtag, modcode, base, mltag, reverse):
     """
@@ -272,8 +304,141 @@ def get_mod_dict(query_seq, mmtag, modcode, base, mltag, reverse):
     """
     mod_base_indices = parse_mmtag(query_seq, mmtag, modcode, base, reverse)
     mod_scores = parse_mltag(mltag)
+    if len(mod_base_indices) != len(mod_scores):
+        raise Exception("Can't resolve base modifications from MM and ML tags in read")
+
     mod_dict = dict(zip(mod_base_indices, mod_scores))
     return mod_dict
+
+
+def get_mm_and_ml_values(read):
+    """
+    Check for SAM-spec methylation tags in reads
+
+    Return a 2-tuple of MM and ML strings, or None if these tags do not exist
+    """
+
+    mmtag, mltag = None, None
+    try:
+        mmtag = read.get_tag('Mm')
+        mltag = read.get_tag('Ml')
+    except KeyError:
+        pass
+    try:
+        mmtag = read.get_tag('MM')
+        mltag = read.get_tag('ML')
+    except KeyError:
+        pass
+
+    if mmtag is None or mltag is None:
+        # if no SAM-spec methylation tags present, ignore read and log
+        logging.warning("pileup_from_reads: read missing MM and/or ML tag(s): {}".format(read.query_name))
+        return None
+    else:
+        return mmtag, mltag
+
+    # Filtering on empty MM or ML tag values makes sense but will change the pileup results, so we need to test impact
+    # first.
+    #
+    # elif mmtag == "" or mltag == "":
+    #    logging.warning("pileup_from_reads: MM and/or ML tag(s) have no value: {}".format(read.query_name))
+    #    return None
+
+
+class PileupData:
+    def __init__(self):
+        self.basemod_data = []
+
+        # These structures are only used for modsites denovo mode
+        self.pos_pileup = []
+        self.pos_pileup_hap1 = []
+        self.pos_pileup_hap2 = []
+
+
+def process_read(ref, pos_start, pos_stop, hap_tag, is_denovo_modsites, pileup_data, read):
+    """
+    Process pileup information from a single read
+
+    :param ref: Reference name. (str)
+    :param pos_start: Start coordinate for region. (int)
+    :param pos_stop: Stop coordinate for region. (int)
+    :param hap_tag: Name of SAM tag containing haplotype information. (str)
+    :param is_denovo_modsites: True if modsites mode is 'denovo' (bool)
+    :param pileup_data:
+    :param read:
+    """
+
+    # identify the haplotype tag, if any (default tag = HP)
+    # values are 1 or 2 (for haplotypes), or 0 (no haplotype)
+    # an integer is expected but custom tags can produce strings instead
+    try:
+        hap_val = read.get_tag(hap_tag)
+        try:
+            hap = int(hap_val)
+        except ValueError:
+            logging.error(
+                "coordinates {}: {:,}-{:,}: (2) pileup_from_reads: illegal haplotype value {}".format(ref, pos_start,
+                                                                                                      pos_stop,
+                                                                                                      hap_val))
+    except KeyError:
+        hap = 0
+
+    meth_tags = get_mm_and_ml_values(read)
+    if meth_tags is None:
+        return
+
+    mmtag, mltag = meth_tags
+
+    if not pileup_data.basemod_data:
+        ref_pos_count = 1 + pos_stop - pos_start
+
+        pileup_data.basemod_data = [[] for _ in range(ref_pos_count)]
+        if is_denovo_modsites:
+            pileup_data.pos_pileup = [[] for _ in range(ref_pos_count)]
+            pileup_data.pos_pileup_hap1 = [[] for _ in range(ref_pos_count)]
+            pileup_data.pos_pileup_hap2 = [[] for _ in range(ref_pos_count)]
+
+    is_reverse = bool(read.is_reverse)
+    strand = "+"
+    if is_reverse:
+        strand = "-"
+    rev_strand_offset = len(read.query_sequence) - 2
+
+    # note that this could potentially be used for other mod types, but
+    # the Mm and Ml parsing functions are not set up for the interleaved format
+    # e.g.,  ‘Mm:Z:C+mh,5,12; Ml:B:C,204,26,89,130’ does NOT work
+    # to work it must be one mod type, and one score per mod position
+    mod_dict = get_mod_dict(read.query_sequence, mmtag, 'C+m', 'C', mltag, is_reverse)
+
+    # iterate over positions
+    for query_pos, ref_pos in read.get_aligned_pairs(matches_only=True)[20:-20]:
+        # make sure ref position is in range of ref target region
+        if ref_pos >= pos_start and ref_pos <= pos_stop:
+            ref_offset = ref_pos - pos_start
+
+            # building a consensus is MUCH faster when we iterate over reads (vs. by column then by read)
+            # we are building a dictionary with ref position as key and list of bases as val
+            if is_denovo_modsites:
+                query_base = read.query_sequence[query_pos]
+                pileup_data.pos_pileup[ref_offset].append(query_base)
+                if hap == 1:
+                    pileup_data.pos_pileup_hap1[ref_offset].append(query_base)
+                elif hap == 2:
+                    pileup_data.pos_pileup_hap2[ref_offset].append(query_base)
+
+            # identify if read is reverse strand or forward to set correct location
+            if is_reverse:
+                location = (rev_strand_offset - query_pos)
+            else:
+                location = query_pos
+
+            # check if this position has a mod score in the dictionary,
+            # if not assign score of zero
+            score = mod_dict.get(location, 0)
+
+            # Add tuple with strand, modification score, and haplotype to the list for this position
+            pileup_data.basemod_data[ref_offset].append((strand, score, hap))
+
 
 def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsites):
     """
@@ -299,12 +464,7 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
     """
     logging.debug("coordinates {}: {:,}-{:,}: (2) pileup_from_reads".format(ref, pos_start, pos_stop))
 
-    basemod_data = []
-
-    # These structures are only used for modsites denovo mode
-    pos_pileup = []
-    pos_pileup_hap1 = []
-    pos_pileup_hap2 = []
+    pileup_data = PileupData()
 
     is_denovo_modsites = modsites == "denovo"
 
@@ -312,104 +472,27 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
     for read in bamIn.fetch(contig=ref, start=pos_start, stop=pos_stop):
         # check if passes minimum mapping quality score
         if read.mapping_quality < min_mapq:
-            #logging.warning("pileup_from_reads: read did not pass minimum mapQV: {}".format(read.query_name))
+            # logging.warning("pileup_from_reads: read did not pass minimum mapQV: {}".format(read.query_name))
             continue
-        # identify the haplotype tag, if any (default tag = HP)
-        # values are 1 or 2 (for haplotypes), or 0 (no haplotype)
-        # an integer is expected but custom tags can produce strings instead
+
         try:
-            hap_val = read.get_tag(hap_tag)
-            try:
-                hap = int(hap_val)
-            except ValueError:
-                logging.error("coordinates {}: {:,}-{:,}: (2) pileup_from_reads: illegal haplotype value {}".format(ref, pos_start, pos_stop, hap_val))
-        except KeyError:
-            hap = 0
-
-        # check for SAM-spec methylation tags
-        # draft tags were Ml and Mm, accepted tags are now ML and MM
-        # check for both types, set defaults to None and change if found
-        mmtag, mltag = None, None
-        try:
-            mmtag = read.get_tag('Mm')
-            mltag = read.get_tag('Ml')
-        except KeyError:
-            pass
-        try:
-            mmtag = read.get_tag('MM')
-            mltag = read.get_tag('ML')
-        except KeyError:
-            pass
-
-        if mmtag is not None and mltag is not None:
-            if not basemod_data:
-                ref_pos_count = 1 + pos_stop - pos_start
-
-                basemod_data = [[] for _ in range(ref_pos_count)]
-                if is_denovo_modsites:
-                    pos_pileup = [[] for _ in range(ref_pos_count)]
-                    pos_pileup_hap1 = [[] for _ in range(ref_pos_count)]
-                    pos_pileup_hap2 = [[] for _ in range(ref_pos_count)]
-
-            is_reverse = bool(read.is_reverse)
-            strand = "+"
-            if is_reverse :
-                strand = "-"
-            rev_strand_offset = len(read.query_sequence)  - 2
-
-            # note that this could potentially be used for other mod types, but
-            # the Mm and Ml parsing functions are not set up for the interleaved format
-            # e.g.,  ‘Mm:Z:C+mh,5,12; Ml:B:C,204,26,89,130’ does NOT work
-            # to work it must be one mod type, and one score per mod position
-            mod_dict = get_mod_dict(read.query_sequence, mmtag, 'C+m', 'C', mltag, is_reverse)
-
-            if True:
-                # iterate over positions
-                for query_pos, ref_pos in read.get_aligned_pairs(matches_only=True)[20:-20]:
-                    # make sure ref position is in range of ref target region
-                    if ref_pos >= pos_start and ref_pos <= pos_stop:
-                        ref_offset = ref_pos - pos_start
-
-                        # building a consensus is MUCH faster when we iterate over reads (vs. by column then by read)
-                        # we are building a dictionary with ref position as key and list of bases as val
-                        if is_denovo_modsites:
-                            query_base = read.query_sequence[query_pos]
-                            pos_pileup[ref_offset].append(query_base)
-                            if hap == 1:
-                                pos_pileup_hap1[ref_offset].append(query_base)
-                            elif hap == 2:
-                                pos_pileup_hap2[ref_offset].append(query_base)
-
-                        # identify if read is reverse strand or forward to set correct location
-                        if is_reverse:
-                            location = (rev_strand_offset - query_pos)
-                        else:
-                            location = query_pos
-
-                        # check if this position has a mod score in the dictionary,
-                        # if not assign score of zero
-                        score = mod_dict.get(location, 0)
-
-                        # Add tuple with strand, modification score, and haplotype to the list for this position
-                        basemod_data[ref_offset].append((strand, score, hap))
-
-        # if no SAM-spec methylation tags present, ignore read and log
-        else:
-            logging.warning("pileup_from_reads: read missing MM and/or ML tag(s): {}".format(read.query_name))
+            process_read(ref, pos_start, pos_stop, hap_tag, is_denovo_modsites, pileup_data, read)
+        except Exception as e:
+            raise Exception("Exception thrown while processing read {}: {}\n".format(read.query_name, e))
 
     cg_sites_read_set = set()
     if is_denovo_modsites:
-        for refpos_list in (pos_pileup, pos_pileup_hap1, pos_pileup_hap2):
+        for refpos_list in (pileup_data.pos_pileup, pileup_data.pos_pileup_hap1, pileup_data.pos_pileup_hap2):
             last_base = 'N'
             last_index = 0
-            for index,v in enumerate(refpos_list):
+            for index, v in enumerate(refpos_list):
                 # find the most common base, if no reads present use N
                 if len(v):
                     base = Counter(v).most_common(1)[0][0]
                 else:
                     base = 'N'
-                if last_base == 'C' and base == 'G' :
-                    cg_sites_read_set.add(pos_start+last_index)
+                if last_base == 'C' and base == 'G':
+                    cg_sites_read_set.add(pos_start + last_index)
 
                 # This restriction recreates the original code behavior:
                 # - Advantage: Method can find a CpG aligning across a deletion in the reference
@@ -420,7 +503,8 @@ def pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsit
                     last_base = base
                     last_index = index
 
-    return basemod_data, cg_sites_read_set
+    return pileup_data.basemod_data, cg_sites_read_set
+
 
 def filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites):
     """
@@ -451,21 +535,28 @@ def filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_sto
             # Get CG positions in reference
             cg_sites_ref_set = cg_sites_from_fasta(input_fasta, ref)
             # Keep all sites that match a reference CG position and have at least one basemod observation.
-            filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_ref_set and v]
+            filtered_basemod_data = [(i + pos_start, v) for i, v in enumerate(basemod_data) if
+                                     (i + pos_start) in cg_sites_ref_set and v]
 
-        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_basemod_data)))
+        logging.debug(
+            "coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop,
+                                                                                           len(filtered_basemod_data)))
 
     elif modsites == "denovo":
         if basemod_data:
             # Keep all sites that match position of a read consensus CG site.
-            filtered_basemod_data=[(i+pos_start,v) for i, v in enumerate(basemod_data) if (i + pos_start) in cg_sites_read_set]
+            filtered_basemod_data = [(i + pos_start, v) for i, v in enumerate(basemod_data) if
+                                     (i + pos_start) in cg_sites_read_set]
 
-        logging.debug("coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop, len(filtered_basemod_data)))
+        logging.debug(
+            "coordinates {}: {:,}-{:,}: (3) filter_basemod_data: sites kept = {:,}".format(ref, pos_start, pos_stop,
+                                                                                           len(filtered_basemod_data)))
 
     del basemod_data
     del cg_sites_read_set
 
     return filtered_basemod_data
+
 
 def calc_stats(df):
     """
@@ -482,6 +573,7 @@ def calc_stats(df):
     percentMod = 0.0 if mod == 0 else round((mod / total) * 100, 1)
 
     return percentMod, mod, unMod, modScore, unModScore
+
 
 def collect_bed_results_count(ref, pos_start, pos_stop, filtered_basemod_data):
     """
@@ -532,6 +624,7 @@ def collect_bed_results_count(ref, pos_start, pos_stop, filtered_basemod_data):
 
     return bed_results
 
+
 def get_normalized_histo(probs, adj):
     """
     Create the array data structure needed to apply the model, for a given site.
@@ -552,6 +645,7 @@ def get_normalized_histo(probs, adj):
     else:
         return []
 
+
 def discretize_score(score, coverage):
     """
     Apply a small correction to the model probability to make it
@@ -568,14 +662,14 @@ def discretize_score(score, coverage):
     # which allows a push towards 0/50/100 for adjusted score
     if score > 50:
         if score < 65:
-            mod_reads = int(np.floor(score/100 * float(coverage)))
+            mod_reads = int(np.floor(score / 100 * float(coverage)))
         else:
-            mod_reads = int(np.ceil(score/100 * float(coverage)))
+            mod_reads = int(np.ceil(score / 100 * float(coverage)))
     else:
         if score > 35:
-            mod_reads = int(np.ceil(score/100 * float(coverage)))
+            mod_reads = int(np.ceil(score / 100 * float(coverage)))
         else:
-            mod_reads = int(np.floor(score/100 * float(coverage)))
+            mod_reads = int(np.floor(score / 100 * float(coverage)))
 
     unmod_reads = int(coverage) - mod_reads
 
@@ -585,6 +679,7 @@ def discretize_score(score, coverage):
         adjusted_score = round((mod_reads / (mod_reads + unmod_reads)) * 100, 1)
 
     return mod_reads, unmod_reads, adjusted_score
+
 
 def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, model, hap, bed_results):
     """
@@ -614,9 +709,12 @@ def apply_model(refpositions, normhistos, coverages, ref, pos_start, pos_stop, m
         for i, position in enumerate(refpositions):
             model_score = round(predict[i][0] * 100, 1)
             mod_reads, unmod_reads, adjusted_score = discretize_score(model_score, coverages[i])
-            bed_results.append((ref, position, (position + 1), model_score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score))
+            bed_results.append(
+                (ref, position, (position + 1), model_score, hap, coverages[i], mod_reads, unmod_reads, adjusted_score))
     else:
-        logging.warning("coordinates {}: {:,}-{:,}: apply_model: insufficient data for {}".format(ref, pos_start, pos_stop, hap))
+        logging.warning(
+            "coordinates {}: {:,}-{:,}: apply_model: insufficient data for {}".format(ref, pos_start, pos_stop, hap))
+
 
 def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, model_dir):
     """
@@ -642,8 +740,8 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, m
     logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
     # this may or may not do anything to help with the greedy thread situation...
-    #tf.config.threading.set_intra_op_parallelism_threads(1)
-    #tf.config.threading.set_inter_op_parallelism_threads(1)
+    # tf.config.threading.set_intra_op_parallelism_threads(1)
+    # tf.config.threading.set_inter_op_parallelism_threads(1)
 
     model = tf.keras.models.load_model(model_dir, compile=False)
 
@@ -688,11 +786,15 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, m
     # initiate empty list to store all bed results
     bed_results = []
     # run model for total, hap1, hap2, and add to bed results if non-empty list was returned
-    apply_model(total_refpositions, total_normhistos, total_coverages, ref, pos_start, pos_stop, model, "Total", bed_results)
-    apply_model(hap1_refpositions, hap1_normhistos, hap1_coverages, ref, pos_start, pos_stop, model, "hap1", bed_results)
-    apply_model(hap2_refpositions, hap2_normhistos, hap2_coverages, ref, pos_start, pos_stop, model, "hap2", bed_results)
+    apply_model(total_refpositions, total_normhistos, total_coverages, ref, pos_start, pos_stop, model, "Total",
+                bed_results)
+    apply_model(hap1_refpositions, hap1_normhistos, hap1_coverages, ref, pos_start, pos_stop, model, "hap1",
+                bed_results)
+    apply_model(hap2_refpositions, hap2_normhistos, hap2_coverages, ref, pos_start, pos_stop, model, "hap2",
+                bed_results)
 
     return bed_results
+
 
 def run_process_region(arguments):
     """
@@ -719,7 +821,8 @@ def run_process_region(arguments):
     # get all ref sites with mods and information from corresponding aligned reads
     basemod_data, cg_sites_read_set = pileup_from_reads(bamIn, ref, pos_start, pos_stop, min_mapq, hap_tag, modsites)
     # filter based on denovo or reference sites
-    filtered_basemod_data =  filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta, modsites)
+    filtered_basemod_data = filter_basemod_data(basemod_data, cg_sites_read_set, ref, pos_start, pos_stop, input_fasta,
+                                                modsites)
     # bam object no longer needed, close file
     bamIn.close()
 
@@ -744,7 +847,7 @@ def run_process_region_wrapper(arguments):
     try:
         return run_process_region(arguments)
     except Exception as e:
-        sys.stderr.write("Exception thrown in worker process {}: {}\n".format(os.getpid(),e))
+        sys.stderr.write("Exception thrown in worker process {}: {}\n".format(os.getpid(), e))
         raise
 
 
@@ -773,7 +876,14 @@ def run_all_pileup_processing(regions_to_process, threads):
 
         # Process results in order of completion
         for future in concurrent.futures.as_completed(futures):
-            bed_result = future.result()
+            try:
+                bed_result = future.result()
+            except:
+                # cancel all remaining futures
+                for f in futures:
+                    f.cancel()
+                raise
+
             bed_results.append(bed_result)
             if progress_bar:
                 progress_bar.update(1)
@@ -794,6 +904,7 @@ def run_all_pileup_processing(regions_to_process, threads):
         logging.info("run_all_pileup_processing: Finished sort for bed results.\n")
 
     return flattened_bed_results
+
 
 def write_output_bed(label, modsites, min_coverage, bed_results):
     """
@@ -844,7 +955,8 @@ def write_output_bed(label, modsites, min_coverage, bed_results):
                         fh_hap2.write("{}\n".format("\t".join([str(j) for j in i])))
 
     # write coverage-filtered versions of bed files
-    logging.info("write_output_bed: Writing coverage-filtered output bed files, using min coverage = {}.\n".format(min_coverage))
+    logging.info(
+        "write_output_bed: Writing coverage-filtered output bed files, using min coverage = {}.\n".format(min_coverage))
     output_files = []
     for inBed, covBed in [(out_total, cov_total), (out_hap1, cov_hap1), (out_hap2, cov_hap2)]:
         # if haplotypes not present, the bed files are empty, remove and do not write cov-filtered version
@@ -864,6 +976,7 @@ def write_output_bed(label, modsites, min_coverage, bed_results):
                 output_files.append(covBed)
 
     return output_files
+
 
 def make_bed_df(bed, pileup_mode):
     """
@@ -885,19 +998,21 @@ def make_bed_df(bed, pileup_mode):
     logging.debug("make_bed_df: Converting '{}' to pandas dataframe.\n".format(bed))
     if pileup_mode == "count":
         df = pd.read_csv(bed, sep='\t', header=None,
-                         names = ['chromosome', 'start', 'stop', 'mod_probability', 'haplotype', 'coverage',
-                                  'modified_bases', 'unmodified_bases', 'mod_score', 'unmod_score'])
-        df.drop(columns=['modified_bases', 'unmodified_bases', 'mod_score', 'unmod_score', 'haplotype', 'coverage'], inplace=True)
+                         names=['chromosome', 'start', 'stop', 'mod_probability', 'haplotype', 'coverage',
+                                'modified_bases', 'unmodified_bases', 'mod_score', 'unmod_score'])
+        df.drop(columns=['modified_bases', 'unmodified_bases', 'mod_score', 'unmod_score', 'haplotype', 'coverage'],
+                inplace=True)
 
     elif pileup_mode == "model":
         df = pd.read_csv(bed, sep='\t', header=None,
-                         names = ['chromosome', 'start', 'stop', 'mod_probability', 'haplotype', 'coverage',
-                                  'modified_bases', 'unmodified_bases', 'adj_prob'])
+                         names=['chromosome', 'start', 'stop', 'mod_probability', 'haplotype', 'coverage',
+                                'modified_bases', 'unmodified_bases', 'adj_prob'])
         df.drop(columns=['haplotype', 'coverage', 'modified_bases', 'unmodified_bases', 'adj_prob'], inplace=True)
 
-    #df.sort_values(by=['chromosome', 'start'], inplace=True)
+    # df.sort_values(by=['chromosome', 'start'], inplace=True)
 
     return df
+
 
 def get_bigwig_header_info(input_fasta):
     """
@@ -912,6 +1027,7 @@ def get_bigwig_header_info(input_fasta):
         for record in SeqIO.parse(fh, "fasta"):
             header.append((record.id, len(record.seq)))
     return header
+
 
 def write_bigwig_from_df(df, header, outname):
     """
@@ -928,8 +1044,8 @@ def write_bigwig_from_df(df, header, outname):
     # header is a list of tuples, filter to keep only those present in bed
     # must also sort reference contigs by name
     filtered_header = sorted([x for x in header if x[0] in chroms_present], key=itemgetter(0))
-    for i,j in filtered_header:
-        logging.debug("\tHeader includes: '{}', '{}'.".format(i,j))
+    for i, j in filtered_header:
+        logging.debug("\tHeader includes: '{}', '{}'.".format(i, j))
     # raise error if no reference contig names match
     if not filtered_header:
         logging.error("No reference contig names match between bed file and reference fasta!")
@@ -958,6 +1074,7 @@ def write_bigwig_from_df(df, header, outname):
     # close bigwig object
     bw.close()
 
+
 def convert_bed_to_bigwig(bed_files, fasta, pileup_mode):
     """
     Write bigwig files for each output bed file.
@@ -973,13 +1090,14 @@ def convert_bed_to_bigwig(bed_files, fasta, pileup_mode):
         df = make_bed_df(bed, pileup_mode)
         write_bigwig_from_df(df, header, outname)
 
+
 def main():
     args = get_args()
     setup_logging(args.output_label)
     log_args(args)
 
     if args.pileup_mode == "model":
-        if args.model_dir == None:
+        if args.model_dir is None:
             logging.error("Must supply a model to use when running model-based scoring!")
             raise ValueError("Must supply a model to use when running model-based scoring!")
         else:
@@ -1002,5 +1120,41 @@ def main():
 
     print("Finished.\n")
 
+
 if __name__ == '__main__':
     main()
+
+###############################################
+#
+# All unit tests for this script below, these can be run with:
+#     python -m unittest aligned_bam_to_cpg_scores.py
+#
+
+import unittest
+
+
+class Testing(unittest.TestCase):
+    def test_mm_ml_parse(self):
+        # Create an unmapped record with no MM/ML tags:
+        a = pysam.AlignedSegment()
+        a.query_name = "qname"
+        a.query_sequence = "ACGCCGTATCGTCTCGAGGA"
+        a.flag = 4
+        a.query_qualities = pysam.qualitystring_to_array("DDDDDEEEEEDDDDDEEEEE")
+
+        meth_tags = get_mm_and_ml_values(a)
+        self.assertIsNone(meth_tags)
+
+        # # Add empty MM/ML tags to the alignment record:
+        # a.set_tag("MM", "", value_type="Z")
+        # a.set_tag("ML", "")
+        #
+        # meth_tags = get_mm_and_ml_values(a)
+        # self.assertIsNone(meth_tags)
+
+        # Add MM/ML tags to the alignment record:
+        a.set_tag("MM", "C+m,1,0", value_type="Z")
+        a.set_tag("ML", [100, 150])
+
+        meth_tags = get_mm_and_ml_values(a)
+        self.assertIsNotNone(meth_tags)
