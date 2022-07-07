@@ -251,7 +251,7 @@ def parse_mmtag(query_seq, mmtag, modcode, base, reverse):
         return None
 
     modline = get_modline()
-    if modline is None:
+    if modline is None or modline == "":
         return []
 
     # Get the sequence of the mod bases from tag integers
@@ -1153,8 +1153,36 @@ class Testing(unittest.TestCase):
         # self.assertIsNone(meth_tags)
 
         # Add MM/ML tags to the alignment record:
-        a.set_tag("MM", "C+m,1,0", value_type="Z")
+        a.set_tag("MM", "C+m,1,0;", value_type="Z")
         a.set_tag("ML", [100, 150])
 
         meth_tags = get_mm_and_ml_values(a)
         self.assertIsNotNone(meth_tags)
+
+    def test_parse_mmtag(self):
+        # Check standard mmtag parse
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag="C+m,1,0;"
+        modcode="C+m"
+        base="C"
+        reverse=False
+        result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
+        self.assertEqual(result, [3,4])
+
+        # Check empty mmtag parse
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag=""
+        modcode="C+m"
+        base="C"
+        reverse=False
+        result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
+        self.assertEqual(result, [])
+
+        # Check empty C+m mmtag parse
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag="C+m;"
+        modcode="C+m"
+        base="C"
+        reverse=False
+        result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
+        self.assertEqual(result, [])
