@@ -32,7 +32,7 @@ def get_args():
     parser.add_argument("-b", "--bam",
                         required=True,
                         metavar="input.bam",
-                        help="The aligned BAM file.")
+                        help="The aligned BAM file. This file must be sorted and indexed.")
     parser.add_argument("-f", "--fasta",
                         required=True,
                         metavar="ref.fasta",
@@ -91,6 +91,41 @@ def get_args():
                         help="Number of threads for parallel processing. [default = %(default)d]")
 
     return parser.parse_args()
+
+
+def validate_args(args):
+
+    def error_exit(msg):
+        raise Exception(msg)
+
+    def check_required_file(file, label):
+        if not os.path.isfile(file):
+            error_exit(f"Can't find {label} file '{file}'")
+
+    check_required_file(args.bam, "input bam")
+
+    def is_bam_index_found(bam_file):
+        bam_index_extensions = (".bai", ".csi")
+        for ext in bam_index_extensions:
+            bam_index_file=bam_file+ext
+            if os.path.isfile(bam_index_file):
+                return True
+        return False
+
+    if not is_bam_index_found(args.bam):
+        error_exit(f"Can't find index for bam file '{args.bam}'")
+
+    check_required_file(args.fasta, "reference fasta")
+
+    if args.pileup_mode == "model":
+        if args.model_dir is None:
+            error_exit("Must supply a model to use when running model-based scoring")
+        else:
+            if not os.path.isdir(args.model_dir):
+                error_exit("{} is not a valid directory path!".format(args.model_dir))
+    else:
+        if args.model_dir is not None:
+            error_exit("Model directory is not used unless model-based scoring is selected")
 
 
 def setup_logging(output_label):
@@ -1094,16 +1129,8 @@ def convert_bed_to_bigwig(bed_files, fasta, pileup_mode):
 def main():
     args = get_args()
     setup_logging(args.output_label)
+    validate_args(args)
     log_args(args)
-
-    if args.pileup_mode == "model":
-        if args.model_dir is None:
-            logging.error("Must supply a model to use when running model-based scoring!")
-            raise ValueError("Must supply a model to use when running model-based scoring!")
-        else:
-            if not os.path.isdir(args.model_dir):
-                logging.error("{} is not a valid directory path!".format(args.model_dir))
-                raise ValueError("{} is not a valid directory path!".format(args.model_dir))
 
     print("\nChunking regions for multiprocessing.")
     regions_to_process = get_regions_to_process(args.bam, args.fasta, args.chunksize, args.modsites,
