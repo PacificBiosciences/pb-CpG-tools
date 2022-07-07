@@ -1,0 +1,23 @@
+name: Run tests
+
+on:
+  push:
+    branches: [ main, test-actions ]
+  pull_request:
+    branches: [ main, test-actions ]
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Setup conda environment
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        environment-file: conda_env_cpg.yaml
+
+    - name: Run unittests
+      shell: bash -l {0}
+      run: |
+        python -m unittest aligned_bam_to_cpg_scores.py
