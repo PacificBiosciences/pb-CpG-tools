@@ -676,7 +676,7 @@ def collect_bed_results_model(ref, pos_start, pos_stop, filtered_basemod_data, m
     #tf.config.threading.set_intra_op_parallelism_threads(1)
     #tf.config.threading.set_inter_op_parallelism_threads(1)
 
-    interpreter = tf.lite.Interpreter(model_dir + ".tflite")
+    interpreter = tf.lite.Interpreter(model_dir)
 
     total_refpositions, total_normhistos, total_coverages = [], [], []
     hap1_refpositions, hap1_normhistos, hap1_coverages = [], [], []
@@ -1011,17 +1011,17 @@ def main():
     log_args(args)
 
     if args.pileup_mode == "model":
-        if args.model_dir == None:
+        if args.model_file == None:
             logging.error("Must supply a model to use when running model-based scoring!")
             raise ValueError("Must supply a model to use when running model-based scoring!")
         else:
-            if not os.path.isdir(args.model_dir):
-                logging.error("{} is not a valid directory path!".format(args.model_dir))
-                raise ValueError("{} is not a valid directory path!".format(args.model_dir))
+            if not os.path.isfile(args.model_file):
+                logging.error("{} is not a valid file path!".format(args.model_file))
+                raise ValueError("{} is not a valid file path!".format(args.model_file))
 
     print("\nChunking regions for multiprocessing.")
     regions_to_process = get_regions_to_process(args.bam, args.fasta, args.chunksize, args.modsites,
-                                                args.pileup_mode, args.model_dir, args.min_mapq, args.hap_tag)
+                                                args.pileup_mode, args.model_file, args.min_mapq, args.hap_tag)
 
     print("Running multiprocessing on {:,} chunks.".format(len(regions_to_process)))
     bed_results = run_all_pileup_processing(regions_to_process, args.threads)
