@@ -280,9 +280,20 @@ def parse_mmtag(query_seq, mmtag, modcode, base, reverse):
         tags are written as: C+m,5,12,0;C+h,5,12,0;
         if multiple mod types present in tag, must find relevant one first
         """
-        for x in mmtag.split(';'):
-            if not x.startswith(modcode): continue
-            return x[len(modcode) + 1:]
+        for mmsection in mmtag.split(';'):
+            if not mmsection.startswith(modcode):
+                continue
+            start_index = len(modcode)
+
+            # Note that this method treats either value of the skip-base mode in the same way to
+            # stay back-compatible with older bams where this wasn't specified.
+            if len(mmsection) > start_index and mmsection[start_index] in "?.":
+                start_index += 1
+            if len(mmsection) > start_index:
+                if mmsection[start_index] != ',':
+                    raise Exception(f"Can't parse MM tag segment '{mmsection}' due to unexpected value in position {start_index+1}")
+                start_index += 1
+            return mmsection[start_index:]
         return None
 
     modline = get_modline()
@@ -343,6 +354,7 @@ def get_mod_dict(query_seq, mmtag, modcode, base, mltag, reverse):
         raise Exception("Can't resolve base modifications from MM and ML tags in read")
 
     mod_dict = dict(zip(mod_base_indices, mod_scores))
+
     return mod_dict
 
 
@@ -1195,6 +1207,42 @@ class Testing(unittest.TestCase):
         reverse=False
         result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
         self.assertEqual(result, [3,4])
+
+        # Check mmtag parse when skip-type '?' is included
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag="C+m?,1,0;"
+        modcode="C+m"
+        base="C"
+        reverse=False
+        result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
+        self.assertEqual(result, [3,4])
+
+        # Check mmtag parse when skip-type '.' is included
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag="C+m.,1,0;"
+        modcode="C+m"
+        base="C"
+        reverse=False
+        result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
+        self.assertEqual(result, [3,4])
+
+        # Check mmtag parse when skip-type '.' is included with empty tag
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag="C+m.;"
+        modcode="C+m"
+        base="C"
+        reverse=False
+        result=parse_mmtag(query_seq, mmtag, modcode, base, reverse)
+        self.assertEqual(result, [])
+
+        # Check mmtag parse when skip-type '.' is included with invalid character
+        query_seq="ACGCCGTATCGTCTCGAGGA"
+        mmtag="C+m.X"
+        modcode="C+m"
+        base="C"
+        reverse=False
+        with self.assertRaises(Exception) as context:
+            parse_mmtag(query_seq, mmtag, modcode, base, reverse)
 
         # Check empty mmtag parse
         query_seq="ACGCCGTATCGTCTCGAGGA"
