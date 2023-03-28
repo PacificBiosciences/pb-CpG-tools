@@ -120,9 +120,10 @@ GRCh38. There are also four unaligned bam files containing the HiFi reads.
 
 ## Performance
 
-Given a ~30x coverage WGS aligned BAM, such as the example data above, it should take approximately 40 minutes to
-complete default mode pileup track generation on 16 threads using about 6 Gb of memory. Runtime
-should scale approximately linearly with thread count.
+Given a human ~30x WGS aligned BAM, such as the example data above, it should take approximately 40 minutes to
+complete default mode pileup track generation on 8 threads using 6 Gb of memory. Runtime should scale
+approximately linearly with thread count until limited by the filesystem's ability to read the bam file in parallel.
+Peak memory demand should be approximately constant for a human sample at 6 Gb regardless of thread count.
 
 ## Comparison to Version 1
 
