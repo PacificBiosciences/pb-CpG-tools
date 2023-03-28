@@ -9,20 +9,20 @@ To use `aligned_bam_to_cpg_scores` download the latest release tarball compiled 
 [github release channel](https://github.com/PacificBiosciences/pb-CpG-tools/releases/latest), then unpack the tar file.
 As an example, the v2.1.0 release can be obtained as follows:
 
-    wget https://github.com/PacificBiosciences/pb-CpG-tools/releases/download/v2.1.0/pb-CpG-tools-2.1.0.x86_64-linux.tbz
-    tar -xzf pb-CpG-tools-2.1.0.x86_64-linux.tbz
+    wget https://github.com/PacificBiosciences/pb-CpG-tools/releases/download/v2.1.0/pb-CpG-tools-v2.1.0-x86_64-unknown-linux-gnu.tar.gz
+    tar -xzf pb-CpG-tools-v2.1.0-x86_64-unknown-linux-gnu.tar.gz
 
     # Run help option to test binary and see latest usage details:
-    pb-CpG-tools-2.1.0.x86_64-linux/bin/aligned_bam_to_cpg_scores --help
+    pb-CpG-tools-v2.1.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores --help
 
 `aligned_bam_to_cpg_scores` includes a number of ways to summarize site propabilities for 5mC methylation,
 detailed below.  The recommended default workflow will use the `model` pileup mode and `denovo` modsites mode.
 Continuing from the v2.1.0 example above, the script below runs the tool on a mapped WGS bam for HG002:
 
-    pb-CpG-tools-2.1.0.x86_64-linux/bin/aligned_bam_to_cpg_scores \
+    pb-CpG-tools-v2.1.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
       --bam HG002.hg38.pbmm2.bam \
       --output-prefix HG002.hg38.pbmm2 \
-      --model pb-CpG-tools-2.1.0.x86_64-linux/models/pileup_calling_model.v1.tflite \
+      --model pb-CpG-tools-v2.1.0-x86_64-unknown-linux-gnu/models/pileup_calling_model.v1.tflite \
       --threads 16
 
 See the cmdline usage help for the full list of other commandline options:
