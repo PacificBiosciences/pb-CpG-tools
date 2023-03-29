@@ -23,7 +23,7 @@ Continuing from the v2.1.0 example above, the script below runs the tool on a ma
       --bam HG002.hg38.pbmm2.bam \
       --output-prefix HG002.hg38.pbmm2 \
       --model pb-CpG-tools-v2.1.0-x86_64-unknown-linux-gnu/models/pileup_calling_model.v1.tflite \
-      --threads 16
+      --threads 8
 
 See the cmdline usage help for the full list of other commandline options:
 
