@@ -1,3 +1,10 @@
+## v2.1.1 - 2023-04-04
+
+### Fixed
+- Fix parse error in MM/ML methylation tags
+  - An infrequent error occurred when a reverse-mapped read ends (in sequenced orientation) with a methylated C base
+  - Fixes #41
+
 ## v2.1.0 - 2023-03-27
 
 Initial update to the new binary version of `aligned_bam_to_cpg_scores`, replacing the similarly named python script
@@ -15,4 +22,4 @@ Includes several new features, such as denovo modsites mode, and addresses previ
 
 ## v1.0.0 - 2022-03-25
 
-Initial release of the python implmentation.
+Initial release of the python implementation.
