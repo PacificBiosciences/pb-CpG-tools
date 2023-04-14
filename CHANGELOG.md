@@ -1,8 +1,16 @@
+## v2.2.0 - 2023-04-14
+
+### Added
+- Added progress bar to bam processing step
+
+### Fixed
+- Clarified error message when an unmapped alignment file is input
+
 ## v2.1.1 - 2023-04-04
 
 ### Fixed
 - Fix parse error in MM/ML methylation tags
-  - An infrequent error occurred when a reverse-mapped read ends (in sequenced orientation) with a methylated C base
+  - An infrequent error occurred when a reverse-mapped read ends (in sequenced orientation) with a C base annotated by the MM tag
   - Fixes #41
 
 ## v2.1.0 - 2023-03-27
