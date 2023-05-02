@@ -1,3 +1,8 @@
+## v2.3.0 - 2023-05-02
+
+### Added
+- Support alignment input in CRAM format
+
 ## v2.2.0 - 2023-04-14
 
 ### Added
