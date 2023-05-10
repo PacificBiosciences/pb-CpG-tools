@@ -1,3 +1,9 @@
+## v2.3.1 - 2023-05-10
+
+### Fixed
+- Fix HP tag parse
+  - The HP tag parser was not handling all possible binary representations of the HP tag in BAM format.
+
 ## v2.3.0 - 2023-05-02
 
 ### Added
