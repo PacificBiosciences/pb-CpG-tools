@@ -50,8 +50,9 @@ Methylated reads mapped with [pbmm2](https://github.com/PacificBiosciences/pbmm2
 will both use soft-clipping for supplementary alignments, which ensures that the `MM` and `ML` tags remain valid and
 interpretable.
 - CRAM format is supported but the corresponding fasta reference file must be specified in this case.
-- These tools are only designed for 5mC tags (e.g. `MM:Z:C+m`) and do not support other modification types or
-multiple-modification format.
+- Multiple base modification types may be present in the file's `MM` and `ML` tags, but only the `C+m` modification key
+will be processed, other modification keys such as `A+a` will be ignored. 5mC modifications encoded with a
+multiple-modification key, such as `C+mh`, cannot be used.
 
 ## Output Files
 
