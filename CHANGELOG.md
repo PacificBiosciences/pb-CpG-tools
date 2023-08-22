@@ -1,8 +1,14 @@
+## v2.3.2 - 2023-08-21
+
+### Fixed
+- Improve error message when read length is too short for MM tag
+
 ## v2.3.1 - 2023-05-10
 
 ### Fixed
 - Fix HP tag parse
-  - The HP tag parser was not handling all possible binary representations of the HP tag in BAM format.
+  - The HP tag parser was not handling all possible binary int representations in BAM format
+  - Fixes #47
 
 ## v2.3.0 - 2023-05-02
 
