@@ -1,3 +1,17 @@
+## v3.0.0 - 2025-01-27
+
+### Added
+- CR-412 Add run metadata header to all bed output files
+
+### Changed
+- CR-413 Compress and index all bed file outputs
+- CR-411 Build default tflite model directly into binary
+  - Users no longer need to provide a model file for the default model pileup mode
+- CR-407 Release source code, update code to build in standard linux context
+
+### Fixed
+- Improve error message when BAM index is missing
+
 ## v2.3.2 - 2023-08-21
 
 ### Fixed

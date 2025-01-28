@@ -1,0 +1,17 @@
+[package]
+name = "rust-vc-utils"
+version = "0.29.0"
+authors = ["Chris Saunders <csaunders@pacificbiosciences.com>"]
+description = "A library of miscellaneous variant calling utilities"
+edition = "2021"
+
+[dependencies]
+approx = "0.5"
+bio = "2"
+indicatif = "0.17"
+log = "0.4"
+rust-htslib = { version = "0", default-features = false }
+rust-libbigwig = { tag = "v0.4.0", git = "https://github.com/ctsa/rust-libbigwig.git" }
+tempfile = "3"
+thousands = "0.2"
+unwrap = "1"

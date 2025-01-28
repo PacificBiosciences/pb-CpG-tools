@@ -6,32 +6,31 @@ reported as both bed and bigwig file outputs. The example below from HG002 shows
 visualize both combined and haplotype-specific methylation probabilities in IGV
 
 <p align="center">
-  <img src="imgs/HG002_PEG3_pileup_tracks.png"  width="80%" height="80%">
+  <img src="img/HG002_PEG3_pileup_tracks.png"  width="80%" height="80%">
 </p>
 
 ## Getting started
 
 To use `aligned_bam_to_cpg_scores` download the latest release tarball compiled for 64-bit linux platforms on the 
 [github release channel](https://github.com/PacificBiosciences/pb-CpG-tools/releases/latest), then unpack the tar file.
-As an example, the v2.3.2 release can be obtained as follows:
+As an example, the v3.0.0 release can be obtained as follows:
 
-    wget https://github.com/PacificBiosciences/pb-CpG-tools/releases/download/v2.3.2/pb-CpG-tools-v2.3.2-x86_64-unknown-linux-gnu.tar.gz
-    tar -xzf pb-CpG-tools-v2.3.2-x86_64-unknown-linux-gnu.tar.gz
+    wget https://github.com/PacificBiosciences/pb-CpG-tools/releases/download/v3.0.0/pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu.tar.gz
+    tar -xzf pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu.tar.gz
 
     # Run help option to test binary and see latest usage details:
-    pb-CpG-tools-v2.3.2-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores --help
+    pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores --help
 
 `aligned_bam_to_cpg_scores` includes a number of ways to summarize site propabilities for 5mC methylation,
 detailed below.  The recommended default workflow will use the `model` pileup mode and `denovo` modsites mode.
 Continuing from the example above, the script below runs the tool on a mapped WGS bam for HG002:
 
-    pb-CpG-tools-v2.3.2-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
+    pb-CpG-tools-v2.4.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
       --bam HG002.hg38.pbmm2.bam \
       --output-prefix HG002.hg38.pbmm2 \
-      --model pb-CpG-tools-v2.3.2-x86_64-unknown-linux-gnu/models/pileup_calling_model.v1.tflite \
       --threads 8
 
-See the cmdline usage help for the full list of other commandline options:
+See the command-line usage help for the full list of other options:
 
     aligned_bam_to_cpg_scores --help
 
@@ -59,32 +58,49 @@ multiple-modification key, such as `C+mh`, cannot be used.
 
 ## Output Files
 
-There are bed (`.bed`) and bigwig (`.bw`) files generated for the complete read set and each separate
-haplotype (when haplotype tags are available in the bam). The bed files are a text format that is easier to review and
-contains additional site data, the bigwig files are an indexed binary format designed to be loaded into IGV for
+There are compressed bed (`.bed.gz`) and bigwig (`.bw`) files generated for the complete read set and each separate
+haplotype (when haplotype tags are available in the bam). The bed files are a bgzipped text format that are easier to
+review and contain additional site data, the bigwig files are an indexed binary format designed to be loaded into IGV for
 visualization.
 
-The following 2 files are always generated:
+Including the bed file index (`.tbi`), the following 3 files are always generated:
 
 ```
-[output-prefix].combined.bed
+[output-prefix].combined.bed.gz
+[output-prefix].combined.bed.gz.tbi
 [output-prefix].combined.bw
 ```
 
-If haplotype information is present in the input alignment file, an additional 4 output files are expected:
+If haplotype information is present in the input alignment file, an additional 6 output files are expected:
 
 ```
-[output-prefix].hap1.bed 
-[output-prefix].hap1.bw 
-[output-prefix].hap2.bed
+[output-prefix].hap1.bed.gz
+[output-prefix].hap1.bed.gz.tbi
+[output-prefix].hap1.bw
+[output-prefix].hap2.bed.gz
+[output-prefix].hap2.bed.gz.tbi
 [output-prefix].hap2.bw
 ```
 
 ### Bed file format
 
+All bed file outputs include a header containing run metadata. The header format provides key/value pairs as
+"##{key}={value}", and a final column names line as "#col1  col2  col3...". An example header is shown below:
+
+```
+##pb-cpg-tools-version=3.0.0
+##cmdline="aligned_bam_to_cpg_scores --bam m84011_220902_175841_s1.HG002.pbmm2-1.13.1.GRCh38.bam --output-prefix HG002 --threads 16"
+##pileup-mode=model
+##modsites-mode=denovo
+##min-coverage=4
+##min-mapq=1
+##basemod-source=primrose 1.3.99 (commit v1.3.0-7-g2b7d465)
+#chrom  begin   end     mod_score       type    cov     est_mod_count   est_unmod_count discretized_mod_score
+```
+
 The bed file columns will differ between the `model` and `count` pileup methods, but both share the first six columns:
 
-1. reference name
+1. chromosome name
 2. start coordinate
 3. end coordinate
 4. modification score
@@ -104,9 +120,9 @@ four additional columns are present:
 
 For the `model` pileup mode, three additional columns are present:
 
-7. estimated modified site count (extrapolated from model modification probability)
-8. estimated unmodified site count (extrapolated from model modification probability)
-9. discretized modification probability (calculated from estimated mod/unmod site counts)
+7. estimated modified site count (extrapolated from model modification score)
+8. estimated unmodified site count (extrapolated from model modification score)
+9. discretized modification score (calculated from estimated modified/unmodified site counts)
 
 ### Bigwig file format
 
@@ -116,10 +132,8 @@ The bigwig files are an indexed binary format which contain columns 1-4 listed a
 ## Output modes and option details
 
 The `--pileup-mode` argument selects the modification probability calculation
-- `model`: (default) This is the recommended pileup mode. It uses distributions of modification
-scores and a machine-learning model to calculate the modification probabilities across CpG sites. When using this option
-a path to a tflite model file must be provided with the `--model` argument. The current recommended model is
-`pileup_calling_model.v1.tflite` found in the [models](models) directory.
+- `model`: (default) This is the recommended pileup mode. It uses distributions of modification scores and a
+machine-learning model to calculate the modification probabilities across CpG sites.
 - `count`: For a given site, all bases with a 5mC modification probability greater than 0.5 are classified as modified,
 and all other bases are classified as unmodified. The methylation probability for a site is set to the proportion of
 bases classified as modified. In addition, the count and average modification probability (expressed as a percentage),
@@ -133,7 +147,7 @@ reference also displays a CG site (e.g., there could be sequence mismatches betw
 of CG sites with zero modification probability. This mode does not ensure that aligned reads also display a CG site
 (e.g., there could be sequence mismatches between the reads and reference). 
 
-Using the `--hap-tag` flag allows an arbitrary SAM tag to be used to identify haplotypes, rather than the default `HP`
+Using the `--hap-tag` argument allows an arbitrary SAM tag to be used to identify haplotypes, rather than the default `HP`
 tag. The haplotype values must be `0`, `1`, and `2`, where `0` is not assigned/ambiguous.
 
 ## Example Data
@@ -151,29 +165,15 @@ complete default mode pileup track generation on 8 threads using 6 Gb of memory.
 approximately linearly with thread count until limited by the filesystem's ability to read the bam file in parallel.
 Peak memory demand should be approximately constant for a human sample at 6 Gb regardless of thread count.
 
-## Comparison to Version 1
+## Breaking changes from pb-CpG-tools v2
 
-5mC site analysis was previously provided by the `aligned_bam_to_cpg_scores.py` python script in version 1.x releases.
+Upgrading from v2 to v3 of pb-CpG-tools could require adjustments to the command-line and output file processing:
 
-The version 2 release of `aligned_bam_to cpg_scores` should have approximate feature parity with the previous script,
-although the command-line details have changed.
-
-Given the same bam file and selected output modes, version 2 results should logically match the version 1 script,
-however the results will contain a number of minor expected differences:
-
-1. Floating point thresholds and rounding differences lead to a small number of scoring differences.
-2. In `denovo` modsites mode, tie-breaking details of the python implementation lead to a very small number of 
-marginally `denovo` detected CpG not being included in this version.
-3. The version 1 script output has some minor artifacts at its parallel 'chunksize' boundaries. These issues do not
-occur in version 2.
-4. In count pileup mode, the bam ML tag values are translated into probabilities by taking bin mid-points, so all
-input probabilities are shifted by +(1/512) compared to version 1, which has a corresponding influence on the summarized
-site output.
-
-### Version 1 availability
-
-The python version of the code is deprecated, but if needed the final version of this script before the version 2 update
-is [available here](https://github.com/PacificBiosciences/pb-CpG-tools/tree/v1.2.0).
+- The `--model` argument is no longer required or accepted. All recommended machine-learning model details are built
+directly into pb-CpG-tools.
+- All bed file outputs are now bgzip-compressed with an additional ".gz" extension compared to the v2 output. Each bed
+file output also includes a tabix index file.
+- All bed files now include a metadata header comprised of several lines starting with the `#` character.
 
 ## DISCLAIMER
 
