@@ -1,0 +1,44 @@
+# CI workflow runs all source quality tests. It does not build the release binary.
+#
+name: CI
+
+on:
+  push:
+    branches: [ main, actions_test ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  qc:
+    name: Source QC
+
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_TERM_COLOR: always
+
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.84.0
+        components: clippy, rustfmt
+
+    - name: Check source formatting
+      run: cargo fmt --check
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Test
+      run: cargo test --verbose
+
+    - name: Clippy
+      run: cargo clippy --verbose -- -D warnings
+
+    - name: Clippy on tests
+      run: cargo clippy --tests --verbose -- -D warnings
