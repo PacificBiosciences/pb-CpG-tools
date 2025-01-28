@@ -25,7 +25,7 @@ As an example, the v3.0.0 release can be obtained as follows:
 detailed below.  The recommended default workflow will use the `model` pileup mode and `denovo` modsites mode.
 Continuing from the example above, the script below runs the tool on a mapped WGS bam for HG002:
 
-    pb-CpG-tools-v2.4.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
+    pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
       --bam HG002.hg38.pbmm2.bam \
       --output-prefix HG002.hg38.pbmm2 \
       --threads 8
