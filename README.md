@@ -11,28 +11,45 @@ visualize both combined and haplotype-specific methylation probabilities in IGV
 
 ## Getting started
 
-To use `aligned_bam_to_cpg_scores` download the latest release tarball compiled for 64-bit linux platforms on the 
+### Installation
+
+pb-CpG-tools is available for 64-bit Linux platforms. It can be installed either directly from the GitHub release tarball, or via conda as described below.
+
+#### Install from GitHub
+
+To install from github, download the latest release tarball compiled for 64-bit Linux on the
 [github release channel](https://github.com/PacificBiosciences/pb-CpG-tools/releases/latest), then unpack the tar file.
-As an example, the v3.0.0 release can be obtained as follows:
+For example, the pb-CpG-tools v3.0.0 release can be obtained as follows:
 
     wget https://github.com/PacificBiosciences/pb-CpG-tools/releases/download/v3.0.0/pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu.tar.gz
     tar -xzf pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu.tar.gz
 
-    # Run help option to test binary and see latest usage details:
+The `aligned_bam_to_cpg_scores` binary is found in the `bin/` directory of the unpacked file distribution.
+This can be run with the help option to test the binary and review latest usage details:
+
     pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores --help
 
-`aligned_bam_to_cpg_scores` includes a number of ways to summarize site propabilities for 5mC methylation,
-detailed below.  The recommended default workflow will use the `model` pileup mode and `denovo` modsites mode.
-Continuing from the example above, the script below runs the tool on a mapped WGS bam for HG002:
+#### Install from conda
 
-    pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
+For [conda](https://github.com/conda/conda) users, installing pb-CpG-tools on conda may be a more convenient option. pb-CpG-tools is available for conda on Linux from the `bioconda` channel. A new conda environment with the latest release can be created as follows:
+
+    conda create -n pb-cpg-tools -c bioconda pb-cpg-tools
+
+To test this environment, activate it and run `aligned_bam_to_cpg_scores` with the help option to review the latest usage details:
+
+    conda activate pb-cpg-tools
+    aligned_bam_to_cpg_scores --help
+
+### Example command line
+
+`aligned_bam_to_cpg_scores` includes a number of ways to summarize site probabilities for 5mC methylation,
+detailed further below.  The recommended default workflow will use the `model` pileup mode and `denovo` modsites mode.
+The command line below demonstrates running the tool on a mapped WGS bam for HG002 using the default modes:
+
+    aligned_bam_to_cpg_scores \
       --bam HG002.hg38.pbmm2.bam \
       --output-prefix HG002.hg38.pbmm2 \
       --threads 8
-
-See the command-line usage help for the full list of other options:
-
-    aligned_bam_to_cpg_scores --help
 
 ## Input Alignment File
 
