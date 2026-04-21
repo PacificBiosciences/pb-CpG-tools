@@ -273,6 +273,31 @@ pub enum Bases {
     N,
 }
 
+/// Store phase set ID for the site
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum PsState {
+    Empty,
+    Single(i32),
+    Conflict,
+}
+
+impl PsState {
+    pub fn update(&mut self, new_ps: Option<i32>) {
+        match (*self, new_ps) {
+            // HP = 0, skip
+            (_, None) => {}
+            // New PS ID, save to state
+            (PsState::Empty, Some(new)) => *self = PsState::Single(new),
+            // New PS ID matches, skip
+            (PsState::Single(old), Some(new)) if old == new => {}
+            // New PS ID unmatches, set state as conflicted
+            (PsState::Single(_), Some(_)) => *self = PsState::Conflict,
+            // Already conflicted, skip
+            (PsState::Conflict, _) => {}
+        }
+    }
+}
+
 /// Summarize all base observations at a site for a given haplotype category.
 ///
 /// Note that "haplotype category" includes the unphased/unknown haplotype code '0'
@@ -284,6 +309,9 @@ pub struct HaplotypeMethProbPileupColumn {
 
     /// Count Bases to help determine the majority base
     pub base_counts: [u32; BASE_COUNT],
+
+    /// Phase Set State
+    pub ps_state: PsState,
 }
 
 impl HaplotypeMethProbPileupColumn {
@@ -291,12 +319,14 @@ impl HaplotypeMethProbPileupColumn {
         Self {
             meth_probs: Vec::new(),
             base_counts: [0; BASE_COUNT],
+            ps_state: PsState::Empty,
         }
     }
 
     pub fn clear(&mut self) {
         self.meth_probs.clear();
         self.base_counts = [0; BASE_COUNT];
+        self.ps_state = PsState::Empty;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -312,6 +342,10 @@ impl HaplotypeMethProbPileupColumn {
             _ => 4,
         };
         self.base_counts[index] += 1;
+    }
+
+    pub fn add_ps(&mut self, ps: Option<i32>) {
+        self.ps_state.update(ps);
     }
 
     /// Count of all non-filtered reads at this site corresponding to the given haplotype
@@ -403,6 +437,24 @@ impl MethProbPileupColumn {
         self.haps.iter().map(|x| x.cov()).sum()
     }
      */
+
+    pub fn sanitize_ps_ambiguity(&mut self) {
+        let cross_hap_conflict = matches!(
+            (self.haps[1].ps_state, self.haps[2].ps_state),
+            (PsState::Single(a), PsState::Single(b)) if a != b
+        );
+
+        for hap_id in [1usize, 2usize] {
+            let in_hap_conflict = matches!(self.haps[hap_id].ps_state, PsState::Conflict);
+            if in_hap_conflict || cross_hap_conflict {
+                let ambiguous = std::mem::replace(
+                    &mut self.haps[hap_id],
+                    HaplotypeMethProbPileupColumn::new(),
+                );
+                self.haps[0].merge(&ambiguous);
+            }
+        }
+    }
 
     /// Get a pileup for the 'total' merge of all (disjoint) haplotypes in haps
     ///
@@ -1221,6 +1273,17 @@ impl<'a> MethReadsProcessor<'a> {
                 break;
             }
 
+            self.meth_prob_pileup_ring_buffer.get_mut(ref_pos).sanitize_ps_ambiguity();
+            // Downgrade hap1/hap2 at the next site for keep_cpg_site checks.
+            //
+            // Affected cases would be in mixed phase blocks where 
+            // one of the hap1/hap2 passes the check but the total pileup doesn't. 
+            //
+            // When PS1 and PS2 are inconsistent (flipped), 
+            // mixture of PS1-HP1 and PS2-HP1 adds bias to CpG check.
+            //
+            self.meth_prob_pileup_ring_buffer.get_mut(ref_pos + 1).sanitize_ps_ambiguity();
+
             let meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos);
             let next_meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos + 1);
             self.post_pileup.update_site_data(
@@ -1251,6 +1314,13 @@ impl<'a> MethReadsProcessor<'a> {
 
         // Get haplotype id for this read
         let hap_id = Self::get_hap_id(record, &self.client_options.hap_tag);
+
+        // Get phase set id for phased reads, used to detect inter-block CpG sites
+        let ps_id = if hap_id > 0 {
+            get_optional_int_aux_tag(record, b"PS")
+        } else {
+            None
+        };
 
         // Process bam cigar to map read positions back to the reference positions
         let read_to_ref = get_complete_read_to_ref_pos_map(record);
@@ -1290,6 +1360,7 @@ impl<'a> MethReadsProcessor<'a> {
             if let Some(meth_prob) = meth_prob_option {
                 hap_pileup.meth_probs.push(*meth_prob);
             }
+            hap_pileup.add_ps(ps_id);
         }
 
         Ok(true)
@@ -1306,6 +1377,8 @@ impl<'a> MethReadsProcessor<'a> {
         for ref_pos in self.meth_prob_pileup_ring_buffer.head_pos()
             ..self.meth_prob_pileup_ring_buffer.max_pos() + 1
         {
+            self.meth_prob_pileup_ring_buffer.get_mut(ref_pos).sanitize_ps_ambiguity();
+            self.meth_prob_pileup_ring_buffer.get_mut(ref_pos + 1).sanitize_ps_ambiguity();
             let meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos);
             let next_meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos + 1);
             self.post_pileup.update_site_data(
