@@ -1282,7 +1282,12 @@ impl<'a> MethReadsProcessor<'a> {
             // When PS1 and PS2 are inconsistent (flipped), 
             // mixture of PS1-HP1 and PS2-HP1 adds bias to CpG check.
             //
-            self.meth_prob_pileup_ring_buffer.get_mut(ref_pos + 1).sanitize_ps_ambiguity();
+            // Skip the next site when it is past max_pos to avoid extending max_pos
+            // when ref_pos + 1 is on an uncovered column, which causes
+            // the ref_pos > max_pos early-exit to fail.
+            if ref_pos + 1 <= self.meth_prob_pileup_ring_buffer.max_pos() {
+                self.meth_prob_pileup_ring_buffer.get_mut(ref_pos + 1).sanitize_ps_ambiguity();
+            }
 
             let meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos);
             let next_meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos + 1);
@@ -1378,7 +1383,10 @@ impl<'a> MethReadsProcessor<'a> {
             ..self.meth_prob_pileup_ring_buffer.max_pos() + 1
         {
             self.meth_prob_pileup_ring_buffer.get_mut(ref_pos).sanitize_ps_ambiguity();
-            self.meth_prob_pileup_ring_buffer.get_mut(ref_pos + 1).sanitize_ps_ambiguity();
+            // Skip the next site when it is past max_pos
+            if ref_pos + 1 <= self.meth_prob_pileup_ring_buffer.max_pos() {
+                self.meth_prob_pileup_ring_buffer.get_mut(ref_pos + 1).sanitize_ps_ambiguity();
+            }
             let meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos);
             let next_meth_prob_pileup_column = self.meth_prob_pileup_ring_buffer.get(ref_pos + 1);
             self.post_pileup.update_site_data(
